@@ -393,7 +393,7 @@ export default class ClaudianPlugin extends Plugin {
     return updated;
   }
 
-  private normalizeModelVariantSettings(): boolean {
+  normalizeModelVariantSettings(): boolean {
     const { enableOpus1M, enableSonnet1M } = this.settings;
     let changed = false;
 

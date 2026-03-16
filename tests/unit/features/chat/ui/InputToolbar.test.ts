@@ -139,6 +139,25 @@ describe('ModelSelector', () => {
     expect(label?.textContent).toBeDefined();
   });
 
+  it('should not filter custom env models when 1M toggles are enabled', () => {
+    callbacks.getEnvironmentVariables.mockReturnValue(
+      'ANTHROPIC_MODEL=opus'
+    );
+    callbacks.getSettings.mockReturnValue({
+      model: 'opus',
+      thinkingBudget: 'low',
+      permissionMode: 'normal',
+      enableOpus1M: true,
+      enableSonnet1M: true,
+    });
+
+    selector.renderOptions();
+    selector.updateDisplay();
+
+    const label = parentEl.querySelector('.claudian-model-label');
+    expect(label?.textContent).toBe('Opus');
+  });
+
   it('should show 1M variants instead of standard variants when enabled', () => {
     callbacks.getSettings.mockReturnValue({
       model: 'opus[1m]',

@@ -3,7 +3,7 @@ import type { App } from 'obsidian';
 import { Notice, PluginSettingTab, Setting } from 'obsidian';
 
 import { getCurrentPlatformKey, getHostnameKey } from '../../core/types';
-import { DEFAULT_CLAUDE_MODELS, filterVisibleModelOptions, normalizeVisibleModelVariant } from '../../core/types/models';
+import { DEFAULT_CLAUDE_MODELS, filterVisibleModelOptions } from '../../core/types/models';
 import { getAvailableLocales, getLocaleDisplayName, setLocale, t } from '../../i18n';
 import type { Locale, TranslationKey } from '../../i18n/types';
 import type ClaudianPlugin from '../../main';
@@ -84,26 +84,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
   }
 
   private normalizeModelVariantSettings(): void {
-    const { enableOpus1M, enableSonnet1M } = this.plugin.settings;
-
-    this.plugin.settings.model = normalizeVisibleModelVariant(
-      this.plugin.settings.model,
-      enableOpus1M,
-      enableSonnet1M
-    );
-    this.plugin.settings.titleGenerationModel = normalizeVisibleModelVariant(
-      this.plugin.settings.titleGenerationModel,
-      enableOpus1M,
-      enableSonnet1M
-    );
-
-    if (this.plugin.settings.lastClaudeModel) {
-      this.plugin.settings.lastClaudeModel = normalizeVisibleModelVariant(
-        this.plugin.settings.lastClaudeModel,
-        enableOpus1M,
-        enableSonnet1M
-      );
-    }
+    this.plugin.normalizeModelVariantSettings();
   }
 
   display(): void {

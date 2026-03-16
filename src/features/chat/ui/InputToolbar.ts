@@ -49,14 +49,14 @@ export class ModelSelector {
   }
 
   private getAvailableModels() {
-    let models = [...DEFAULT_CLAUDE_MODELS];
+    const models = [...DEFAULT_CLAUDE_MODELS];
 
     if (this.callbacks.getEnvironmentVariables) {
       const envVarsStr = this.callbacks.getEnvironmentVariables();
       const envVars = parseEnvironmentVariables(envVarsStr);
       const customModels = getModelsFromEnvironment(envVars);
       if (customModels.length > 0) {
-        models = customModels;
+        return customModels;
       }
     }
 
