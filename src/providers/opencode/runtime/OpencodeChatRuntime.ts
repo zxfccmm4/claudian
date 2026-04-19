@@ -62,6 +62,7 @@ import {
   OPENCODE_SYNTHETIC_MODEL_ID,
   type OpencodeDiscoveredModel,
 } from '../models';
+import { OpencodeToolStreamAdapter } from '../normalization/opencodeToolNormalization';
 import { getOpencodeProviderSettings, updateOpencodeProviderSettings } from '../settings';
 import { getOpencodeState, type OpencodeProviderState } from '../types';
 import { buildOpencodePromptBlocks, buildOpencodePromptText } from './buildOpencodePrompt';
@@ -131,6 +132,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
   private sessionCwds = new Map<string, string>();
   private sessionId: string | null = null;
   private readonly sessionUpdateNormalizer = new AcpSessionUpdateNormalizer();
+  private readonly toolStreamAdapter = new OpencodeToolStreamAdapter();
   private transport: AcpJsonRpcTransport | null = null;
 
   constructor(
@@ -276,6 +278,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     this.contextUsage = null;
     this.promptUsage = null;
     this.sessionUpdateNormalizer.reset();
+    this.toolStreamAdapter.reset();
 
     const activeTurn = this.activeTurn;
     try {
@@ -762,7 +765,11 @@ export class OpencodeChatRuntime implements ChatRuntime {
       }
       case 'tool_call':
       case 'tool_call_update': {
-        for (const chunk of normalized.streamChunks) {
+        const streamChunks = normalized.type === 'tool_call'
+          ? this.toolStreamAdapter.normalizeToolCall(normalized.toolCall, normalized.streamChunks)
+          : this.toolStreamAdapter.normalizeToolCallUpdate(normalized.toolCallUpdate, normalized.streamChunks);
+
+        for (const chunk of streamChunks) {
           this.activeTurn.queue.push(chunk);
         }
         return;

@@ -1,8 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 
+import { extractResolvedAnswersFromResultText } from '../../../core/tools/toolInput';
+import { isWriteEditTool, TOOL_ASK_USER_QUESTION } from '../../../core/tools/toolNames';
 import type { ChatMessage, ContentBlock, ToolCallInfo } from '../../../core/types';
 import { extractUserQuery } from '../../../utils/context';
+import { extractDiffData } from '../../../utils/diff';
+import {
+  normalizeOpencodeToolInput,
+  normalizeOpencodeToolName,
+  normalizeOpencodeToolUseResult,
+} from '../normalization/opencodeToolNormalization';
 import { resolveExistingOpencodeDatabasePath } from '../runtime/OpencodePaths';
 import type { OpencodeProviderState } from '../types';
 
@@ -177,20 +185,42 @@ function buildAssistantToolCalls(parts: StoredRow[]): ToolCallInfo[] {
     }
 
     const id = getString(part.callID);
-    const name = getString(part.tool);
+    const rawName = getString(part.tool);
     const state = getObject(part.state);
     const status = mapToolStatus(getString(state?.status));
-    if (!id || !name || !status) {
+    if (!id || !rawName || !status) {
       return [];
     }
 
-    return [{
+    const input = normalizeOpencodeToolInput(rawName, getObject(state?.input) ?? {});
+    const name = normalizeOpencodeToolName(rawName);
+    const result = getString(state?.output) ?? getString(state?.error) ?? undefined;
+    const toolUseResult = normalizeOpencodeToolUseResult(rawName, input, {
+      ...(result ? { output: result } : {}),
+      ...(getObject(state?.metadata) ? { metadata: getObject(state?.metadata) } : {}),
+    });
+
+    const toolCall: ToolCallInfo = {
       id,
-      input: getObject(state?.input) ?? {},
+      input,
       name,
-      result: getString(state?.output) ?? getString(state?.error) ?? undefined,
+      result,
       status,
-    }];
+    };
+
+    if (name === TOOL_ASK_USER_QUESTION) {
+      toolCall.resolvedAnswers = toolUseResult?.answers as ToolCallInfo['resolvedAnswers']
+        ?? extractResolvedAnswersFromResultText(result);
+    }
+
+    if (status === 'completed' && isWriteEditTool(name)) {
+      const diffData = extractDiffData(toolUseResult, toolCall);
+      if (diffData) {
+        toolCall.diffData = diffData;
+      }
+    }
+
+    return [toolCall];
   });
 }
 
