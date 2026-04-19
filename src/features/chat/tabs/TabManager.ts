@@ -6,6 +6,7 @@ import type { ChatRuntime } from '../../../core/runtime/ChatRuntime';
 import type { SlashCommand } from '../../../core/types';
 import { t } from '../../../i18n/i18n';
 import type ClaudianPlugin from '../../../main';
+import { getOpencodeProviderSettings } from '../../../providers/opencode/settings';
 import { chooseForkTarget } from '../../../shared/modals/ForkTargetModal';
 import { getTabProviderId } from './providerResolution';
 import {
@@ -16,7 +17,9 @@ import {
   type ForkContext,
   getTabTitle,
   initializeTabControllers,
+  initializeTabService,
   initializeTabUI,
+  setupServiceCallbacks,
   wireTabInputEvents,
 } from './Tab';
 import {
@@ -59,6 +62,7 @@ export class TabManager implements TabManagerInterface {
   private tabs: Map<TabId, TabData> = new Map();
   private activeTabId: TabId | null = null;
   private callbacks: TabManagerCallbacks;
+  private providerCommandWarmups = new Map<TabId, Promise<void>>();
 
   /** Guard to prevent concurrent tab switches. */
   private isSwitchingTab = false;
@@ -625,12 +629,76 @@ export class TabManager implements TabManagerInterface {
       }
     }
 
+    if (sdkCommands.length === 0) {
+      await this.ensureProviderCommandRuntime(targetTab, providerId);
+
+      if (targetTab.service?.providerId === providerId && targetTab.service.isReady()) {
+        sdkCommands = await targetTab.service.getSupportedCommands();
+      }
+    }
+
     const catalog = ProviderWorkspaceRegistry.getCommandCatalog(providerId);
     if (catalog) {
       catalog.setRuntimeCommands(sdkCommands);
     }
 
     return sdkCommands;
+  }
+
+  private async ensureProviderCommandRuntime(
+    tab: TabData,
+    providerId: string,
+  ): Promise<void> {
+    if (providerId !== 'opencode') {
+      return;
+    }
+
+    const settings = getOpencodeProviderSettings(this.plugin.settings as unknown as Record<string, unknown>);
+    if (!settings.enabled) {
+      return;
+    }
+
+    const existing = this.providerCommandWarmups.get(tab.id);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const warmup = this.warmOpencodeCommandRuntime(tab).finally(() => {
+      if (this.providerCommandWarmups.get(tab.id) === warmup) {
+        this.providerCommandWarmups.delete(tab.id);
+      }
+    });
+    this.providerCommandWarmups.set(tab.id, warmup);
+    await warmup;
+  }
+
+  private async warmOpencodeCommandRuntime(tab: TabData): Promise<void> {
+    const providerId = getTabProviderId(tab, this.plugin);
+    if (providerId !== 'opencode') {
+      return;
+    }
+
+    if (!tab.serviceInitialized || tab.service?.providerId !== providerId) {
+      await initializeTabService(tab, this.plugin);
+      setupServiceCallbacks(tab, this.plugin);
+    }
+
+    if (!tab.service || tab.service.providerId !== providerId) {
+      return;
+    }
+
+    if (!tab.service.isReady()) {
+      const externalContextPaths = tab.ui.externalContextSelector?.getExternalContexts() ?? [];
+      await tab.service.ensureReady({ externalContextPaths });
+    }
+
+    const catalog = ProviderWorkspaceRegistry.getCommandCatalog(providerId);
+    if (!catalog) {
+      return;
+    }
+
+    catalog.setRuntimeCommands(await tab.service.getSupportedCommands());
   }
 
   // ============================================

@@ -16,9 +16,9 @@ const mockDeactivateTab = jest.fn();
 const mockInitializeTabUI = jest.fn();
 const mockInitializeTabControllers = jest.fn();
 const mockInitializeTabService = jest.fn().mockResolvedValue(undefined);
+const mockSetupServiceCallbacks = jest.fn();
 const mockWireTabInputEvents = jest.fn();
 const mockGetTabTitle = jest.fn().mockReturnValue('Test Tab');
-const mockSetupApprovalCallback = jest.fn();
 
 jest.mock('@/features/chat/tabs/Tab', () => ({
   createTab: (...args: any[]) => mockCreateTab(...args),
@@ -28,9 +28,9 @@ jest.mock('@/features/chat/tabs/Tab', () => ({
   initializeTabUI: (...args: any[]) => mockInitializeTabUI(...args),
   initializeTabControllers: (...args: any[]) => mockInitializeTabControllers(...args),
   initializeTabService: (...args: any[]) => mockInitializeTabService(...args),
+  setupServiceCallbacks: (...args: any[]) => mockSetupServiceCallbacks(...args),
   wireTabInputEvents: (...args: any[]) => mockWireTabInputEvents(...args),
   getTabTitle: (...args: any[]) => mockGetTabTitle(...args),
-  setupApprovalCallback: (...args: any[]) => mockSetupApprovalCallback(...args),
 }));
 
 const mockChooseForkTarget = jest.fn();
@@ -929,6 +929,70 @@ describe('TabManager - SDK Commands', () => {
     await expect(manager.getSdkCommands(blankCodexTab!.id)).resolves.toEqual([]);
     expect(readyClaudeService.getSupportedCommands).not.toHaveBeenCalled();
   });
+
+  it('should warm OpenCode on demand when slash commands are requested', async () => {
+    const supportedCommands = [{ id: 'acp:review', name: 'review', content: '' }];
+    let ready = false;
+    const opencodeService = {
+      providerId: 'opencode',
+      isReady: jest.fn(() => ready),
+      ensureReady: jest.fn(async () => {
+        ready = true;
+        return true;
+      }),
+      getSupportedCommands: jest.fn().mockResolvedValue(supportedCommands),
+    };
+    const mockCatalog = {
+      setRuntimeCommands: jest.fn(),
+    };
+
+    ProviderWorkspaceRegistry.setServices('opencode', { commandCatalog: mockCatalog as any });
+    mockGetCapabilities.mockImplementation((providerId: string) => ({
+      providerId,
+      supportsPersistentRuntime: true,
+      supportsNativeHistory: true,
+      supportsPlanMode: providerId === 'claude',
+      supportsRewind: providerId === 'claude',
+      supportsFork: providerId === 'claude',
+      supportsProviderCommands: providerId === 'opencode' || providerId === 'claude',
+      reasoningControl: providerId === 'opencode' ? 'effort' : 'none',
+    }));
+    mockInitializeTabService.mockImplementation(async (tab: any) => {
+      tab.service = opencodeService;
+      tab.serviceInitialized = true;
+    });
+
+    const manager = createManager({
+      plugin: createMockPlugin({
+        settings: {
+          providerConfigs: {
+            opencode: {
+              enabled: true,
+              prewarm: false,
+            },
+          },
+        },
+      }),
+      tabFactory: () => createMockTabData({
+        id: 'tab-opencode',
+        providerId: 'opencode',
+        ui: {
+          externalContextSelector: {
+            getExternalContexts: jest.fn().mockReturnValue([]),
+          },
+        },
+      }),
+    });
+
+    const tab = await manager.createTab();
+
+    await expect(manager.getSdkCommands(tab!.id)).resolves.toEqual(supportedCommands);
+    expect(mockInitializeTabService).toHaveBeenCalledTimes(1);
+    expect(mockSetupServiceCallbacks).toHaveBeenCalledTimes(1);
+    expect(opencodeService.ensureReady).toHaveBeenCalledTimes(1);
+    expect(opencodeService.getSupportedCommands).toHaveBeenCalled();
+    expect(mockCatalog.setRuntimeCommands).toHaveBeenCalledWith(supportedCommands);
+  });
 });
 
 describe('TabManager - Provider Command Catalog', () => {
@@ -959,6 +1023,7 @@ describe('TabManager - Provider Command Catalog', () => {
   afterEach(() => {
     ProviderWorkspaceRegistry.setServices('codex', undefined);
     ProviderWorkspaceRegistry.setServices('claude', undefined);
+    ProviderWorkspaceRegistry.setServices('opencode', undefined);
   });
 
   it('should pass provider catalog config to initializeTabUI for Codex tab', async () => {

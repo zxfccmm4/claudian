@@ -133,6 +133,8 @@ export class OpencodeChatRuntime implements ChatRuntime {
   private promptUsage: AcpUsage | null = null;
   private readonly readyListeners: Array<(ready: boolean) => void> = [];
   private ready = false;
+  private readonly supportedCommandWaiters: Array<(commands: SlashCommand[]) => void> = [];
+  private supportedCommands: SlashCommand[] = [];
   private sessionCwds = new Map<string, string>();
   private sessionId: string | null = null;
   private readonly sessionUpdateNormalizer = new AcpSessionUpdateNormalizer();
@@ -172,10 +174,12 @@ export class OpencodeChatRuntime implements ChatRuntime {
   syncConversationState(
     conversation: { providerState?: Record<string, unknown>; sessionId?: string | null } | null,
   ): void {
-    if (this.sessionId !== (conversation?.sessionId ?? null)) {
+    const nextSessionId = conversation?.sessionId ?? null;
+    if (this.sessionId !== nextSessionId) {
       this.currentSessionModelId = null;
+      this.setSupportedCommands([]);
     }
-    this.sessionId = conversation?.sessionId ?? null;
+    this.sessionId = nextSessionId;
     const state = getOpencodeState(conversation?.providerState);
     this.currentDatabasePath = state.databasePath ?? this.currentDatabasePath;
   }
@@ -357,6 +361,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     this.sessionId = null;
     this.loadedSessionId = null;
     this.currentSessionModelId = null;
+    this.setSupportedCommands([]);
   }
 
   getSessionId(): string | null {
@@ -372,7 +377,26 @@ export class OpencodeChatRuntime implements ChatRuntime {
   }
 
   async getSupportedCommands(): Promise<SlashCommand[]> {
-    return [];
+    if (this.supportedCommands.length > 0 && this.loadedSessionId === this.sessionId) {
+      return [...this.supportedCommands];
+    }
+
+    if (this.sessionId && this.loadedSessionId !== this.sessionId) {
+      const ready = await this.ensureReady({ sessionId: this.sessionId });
+      if (!ready) {
+        return [];
+      }
+    }
+
+    if (this.supportedCommands.length > 0) {
+      return [...this.supportedCommands];
+    }
+
+    if (!this.sessionId || this.loadedSessionId !== this.sessionId) {
+      return [];
+    }
+
+    return this.waitForSupportedCommands();
   }
 
   cleanup(): void {
@@ -510,6 +534,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     this.activeTurn?.queue.close();
     this.activeTurn = null;
     this.currentSessionModelId = null;
+    this.setSupportedCommands([]);
 
     this.connection?.dispose();
     this.connection = null;
@@ -742,6 +767,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     }
 
     try {
+      this.setSupportedCommands([]);
       const response = await this.connection.newSession({
         cwd,
         mcpServers: [],
@@ -765,6 +791,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     }
 
     try {
+      this.setSupportedCommands([]);
       const response = await this.connection.loadSession({
         cwd,
         mcpServers: [],
@@ -795,6 +822,11 @@ export class OpencodeChatRuntime implements ChatRuntime {
       await this.syncSessionModelState({
         configOptions: normalized.configOptions,
       });
+      return;
+    }
+
+    if (normalized.type === 'commands') {
+      this.setSupportedCommands(normalized.commands);
       return;
     }
 
@@ -861,6 +893,37 @@ export class OpencodeChatRuntime implements ChatRuntime {
     );
 
     return mapApprovalDecision(decision);
+  }
+
+  private setSupportedCommands(commands: SlashCommand[]): void {
+    this.supportedCommands = commands.map((command) => ({ ...command }));
+
+    const waiters = this.supportedCommandWaiters.splice(0);
+    for (const waiter of waiters) {
+      waiter(this.supportedCommands);
+    }
+  }
+
+  private waitForSupportedCommands(timeoutMs = 250): Promise<SlashCommand[]> {
+    if (this.supportedCommands.length > 0) {
+      return Promise.resolve([...this.supportedCommands]);
+    }
+
+    return new Promise<SlashCommand[]>((resolve) => {
+      const waiter = (commands: SlashCommand[]) => {
+        clearTimeout(timeoutId);
+        resolve([...commands]);
+      };
+      const timeoutId = setTimeout(() => {
+        const index = this.supportedCommandWaiters.indexOf(waiter);
+        if (index >= 0) {
+          this.supportedCommandWaiters.splice(index, 1);
+        }
+        resolve([...this.supportedCommands]);
+      }, timeoutMs);
+
+      this.supportedCommandWaiters.push(waiter);
+    });
   }
 
   private async readTextFile(

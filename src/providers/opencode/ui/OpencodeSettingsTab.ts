@@ -346,6 +346,14 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
     renderAll();
 
+    new Setting(container).setName('Commands').setHeading();
+
+    context.renderHiddenProviderCommandSetting(container, 'opencode', {
+      name: 'Hidden Commands',
+      desc: 'Hide specific OpenCode slash commands from the dropdown. Enter names without the leading slash, one per line.',
+      placeholder: 'compact\nreview\nfix',
+    });
+
     renderEnvironmentSettingsSection({
       container,
       plugin: context.plugin,
