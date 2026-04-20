@@ -7,6 +7,7 @@ import type {
 import { OpencodeCommandCatalog } from '../commands/OpencodeCommandCatalog';
 import { OpencodeCliResolver } from '../runtime/OpencodeCliResolver';
 import { opencodeSettingsTabRenderer } from '../ui/OpencodeSettingsTab';
+import { OpencodeRuntimeCommandLoader } from './OpencodeRuntimeCommandLoader';
 
 export interface OpencodeWorkspaceServices extends ProviderWorkspaceServices {
   commandCatalog: ProviderCommandCatalog;
@@ -16,6 +17,7 @@ export async function createOpencodeWorkspaceServices(): Promise<OpencodeWorkspa
   return {
     commandCatalog: new OpencodeCommandCatalog(),
     cliResolver: new OpencodeCliResolver(),
+    runtimeCommandLoader: new OpencodeRuntimeCommandLoader(),
     settingsTabRenderer: opencodeSettingsTabRenderer,
   };
 }

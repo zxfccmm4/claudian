@@ -91,8 +91,8 @@ import {
   buildClaudeSDKUserMessage,
 } from './ClaudeUserMessageFactory';
 import {
-  type ClosePersistentQueryOptions,
   type ClaudeEnsureReadyOptions,
+  type ClosePersistentQueryOptions,
   createResponseHandler,
   isTurnCompleteMessage,
   type PersistentQueryConfig,

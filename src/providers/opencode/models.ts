@@ -1,9 +1,3 @@
-import type {
-  AcpSessionConfigOption,
-  AcpSessionModelState,
-} from '../acp';
-import { flattenOpencodeSelectOptions } from './configOptions';
-
 export interface OpencodeDiscoveredModel {
   description?: string;
   label: string;
@@ -21,11 +15,6 @@ export interface OpencodeBaseModel {
   label: string;
   rawId: string;
   variants: OpencodeModelVariant[];
-}
-
-export interface OpencodeSessionModelState {
-  currentRawModelId: string | null;
-  discoveredModels: OpencodeDiscoveredModel[];
 }
 
 export interface OpencodeDiscoveredModelGroup {
@@ -308,50 +297,6 @@ export function groupOpencodeDiscoveredModels(
       models: [...group.models].sort((left, right) => left.label.localeCompare(right.label)),
     }))
     .sort((left, right) => left.providerLabel.localeCompare(right.providerLabel));
-}
-
-export function extractOpencodeSessionModelState(params: {
-  configOptions?: AcpSessionConfigOption[] | null;
-  models?: AcpSessionModelState | null;
-}): OpencodeSessionModelState {
-  const fromConfig = extractFromConfigOptions(params.configOptions ?? null);
-  if (fromConfig.discoveredModels.length > 0) {
-    return fromConfig;
-  }
-
-  return {
-    currentRawModelId: params.models?.currentModelId ?? null,
-    discoveredModels: normalizeOpencodeDiscoveredModels(
-      params.models?.availableModels.map((model) => ({
-        description: model.description ?? undefined,
-        label: model.name,
-        rawId: model.id,
-      })) ?? [],
-    ),
-  };
-}
-
-function extractFromConfigOptions(
-  configOptions: AcpSessionConfigOption[] | null,
-): OpencodeSessionModelState {
-  const modelOption = configOptions?.find((option) => option.id === 'model' && option.type === 'select');
-  if (!modelOption || modelOption.type !== 'select') {
-    return {
-      currentRawModelId: null,
-      discoveredModels: [],
-    };
-  }
-
-  return {
-    currentRawModelId: modelOption.currentValue,
-    discoveredModels: normalizeOpencodeDiscoveredModels(
-      flattenOpencodeSelectOptions(modelOption.options).map((option) => ({
-        description: option.description ?? undefined,
-        label: option.name,
-        rawId: option.value,
-      })),
-    ),
-  };
 }
 
 function dedupeOpencodeVariants(variants: OpencodeModelVariant[]): OpencodeModelVariant[] {

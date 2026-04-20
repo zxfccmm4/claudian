@@ -56,4 +56,17 @@ describe('ProviderWorkspaceRegistry', () => {
 
     expect(ProviderWorkspaceRegistry.getCommandCatalog('claude')).toBe(mockCatalog);
   });
+
+  it('returns the runtime command loader for a provider', () => {
+    const runtimeCommandLoader = {
+      isAvailable: jest.fn().mockReturnValue(true),
+      loadCommands: jest.fn().mockResolvedValue([]),
+    };
+
+    ProviderWorkspaceRegistry.setServices('opencode', {
+      runtimeCommandLoader: runtimeCommandLoader as any,
+    });
+
+    expect(ProviderWorkspaceRegistry.getRuntimeCommandLoader('opencode')).toBe(runtimeCommandLoader);
+  });
 });

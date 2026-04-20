@@ -4,7 +4,6 @@ import {
   decodeOpencodeModelId,
   encodeOpencodeModelId,
   extractOpencodeModelVariantValue,
-  extractOpencodeSessionModelState,
   getOpencodeModelVariants,
   groupOpencodeDiscoveredModels,
   isOpencodeModelSelectionId,
@@ -22,48 +21,6 @@ describe('OpenCode model identity', () => {
     expect(decodeOpencodeModelId(OPENCODE_SYNTHETIC_MODEL_ID)).toBeNull();
     expect(isOpencodeModelSelectionId('opencode:anthropic/claude-sonnet-4')).toBe(true);
     expect(isOpencodeModelSelectionId('claude-sonnet-4')).toBe(false);
-  });
-});
-
-describe('extractOpencodeSessionModelState', () => {
-  it('prefers ACP config options so variants remain discoverable', () => {
-    expect(extractOpencodeSessionModelState({
-      configOptions: [
-        {
-          category: 'model',
-          currentValue: 'anthropic/claude-sonnet-4/high',
-          id: 'model',
-          name: 'Model',
-          options: [
-            { name: 'Anthropic/Claude Sonnet 4', value: 'anthropic/claude-sonnet-4' },
-            { name: 'Anthropic/Claude Sonnet 4 (high)', value: 'anthropic/claude-sonnet-4/high' },
-          ],
-          type: 'select',
-        },
-      ],
-    })).toEqual({
-      currentRawModelId: 'anthropic/claude-sonnet-4/high',
-      discoveredModels: [
-        { label: 'Anthropic/Claude Sonnet 4', rawId: 'anthropic/claude-sonnet-4' },
-        { label: 'Anthropic/Claude Sonnet 4 (high)', rawId: 'anthropic/claude-sonnet-4/high' },
-      ],
-    });
-  });
-
-  it('falls back to session model metadata when config options are unavailable', () => {
-    expect(extractOpencodeSessionModelState({
-      models: {
-        availableModels: [
-          { description: 'Fast', id: 'openai/gpt-5-mini', name: 'OpenAI/GPT-5 Mini' },
-        ],
-        currentModelId: 'openai/gpt-5-mini',
-      },
-    })).toEqual({
-      currentRawModelId: 'openai/gpt-5-mini',
-      discoveredModels: [
-        { description: 'Fast', label: 'OpenAI/GPT-5 Mini', rawId: 'openai/gpt-5-mini' },
-      ],
-    });
   });
 });
 

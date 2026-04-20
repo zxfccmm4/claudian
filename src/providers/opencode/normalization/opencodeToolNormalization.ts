@@ -9,11 +9,12 @@ import {
   TOOL_TASK,
   TOOL_TODO_WRITE,
   TOOL_WEB_FETCH,
+  TOOL_WEB_SEARCH,
   TOOL_WRITE,
 } from '../../../core/tools/toolNames';
-import type { AskUserAnswers, AskUserQuestionItem, StreamChunk } from '../../../core/types';
+import type { AskUserAnswers, AskUserQuestionItem } from '../../../core/types';
 import type { SDKToolUseResult } from '../../../core/types/diff';
-import type { AcpToolCall, AcpToolCallUpdate } from '../../acp';
+import { AcpToolStreamAdapter } from '../../acp';
 
 const TOOL_NAME_MAP: Record<string, string> = {
   bash: TOOL_BASH,
@@ -26,15 +27,11 @@ const TOOL_NAME_MAP: Record<string, string> = {
   task: TOOL_TASK,
   todowrite: TOOL_TODO_WRITE,
   webfetch: TOOL_WEB_FETCH,
+  websearch: TOOL_WEB_SEARCH,
   write: TOOL_WRITE,
 };
 
 type OpencodeKnownToolName = keyof typeof TOOL_NAME_MAP;
-
-interface OpencodeToolState {
-  input: Record<string, unknown>;
-  rawName: string;
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -82,6 +79,32 @@ function firstTrimmedString(...values: unknown[]): string | undefined {
   }
 
   return undefined;
+}
+
+function firstNonEmptyString(...values: unknown[]): string {
+  return firstTrimmedString(...values) ?? '';
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const uniqueValues = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue;
+    }
+
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    uniqueValues.add(trimmed);
+  }
+
+  return [...uniqueValues];
 }
 
 function normalizeQuestionOptions(value: unknown): Array<{ description: string; label: string }> {
@@ -215,45 +238,14 @@ function extractToolMetadata(rawOutput: unknown): Record<string, unknown> | null
   return isPlainObject(rawOutput.metadata) ? rawOutput.metadata : null;
 }
 
-function buildToolState(
-  rawName: string,
-  input: Record<string, unknown>,
-): OpencodeToolState {
-  return {
-    input: normalizeOpencodeToolInput(rawName, input),
-    rawName,
-  };
-}
-
-function updateToolState(
-  current: OpencodeToolState | undefined,
+export function resolveOpencodeRawToolName(
+  currentRawName: string | undefined,
   update: {
     kind?: string | null;
-    rawInput?: unknown;
     title?: string | null;
   },
-): OpencodeToolState {
-  const nextRawName = resolveRawToolName(current?.rawName, update.title, update.kind);
-  const nextInput = current?.input ?? {};
-
-  if (update.rawInput !== undefined) {
-    const rawInput = normalizeRawToolInput(update.rawInput);
-    return buildToolState(nextRawName, { ...nextInput, ...rawInput });
-  }
-
-  if (nextRawName !== current?.rawName) {
-    return buildToolState(nextRawName, nextInput);
-  }
-
-  return current ?? buildToolState(nextRawName, {});
-}
-
-function resolveRawToolName(
-  currentRawName: string | undefined,
-  title?: string | null,
-  kind?: string | null,
 ): string {
-  const titleName = firstTrimmedString(title);
+  const titleName = firstTrimmedString(update.title);
   const knownTitleName = titleName && isKnownToolName(titleName)
     ? titleName.trim().toLowerCase()
     : undefined;
@@ -266,7 +258,7 @@ function resolveRawToolName(
     return currentRawName;
   }
 
-  switch (kind) {
+  switch (update.kind) {
     case 'execute':
       return 'bash';
     case 'fetch':
@@ -278,31 +270,38 @@ function resolveRawToolName(
   }
 }
 
-function normalizeRawToolInput(rawInput: unknown): Record<string, unknown> {
-  return isPlainObject(rawInput) ? rawInput : {};
-}
+function normalizeWebSearchInput(input: Record<string, unknown>): Record<string, unknown> {
+  const action = isPlainObject(input.action)
+    ? input.action
+    : {};
 
-function normalizeChunk(
-  chunk: StreamChunk,
-  state: OpencodeToolState,
-  rawOutput?: unknown,
-): StreamChunk {
-  switch (chunk.type) {
-    case 'tool_use':
-      return {
-        ...chunk,
-        input: state.input,
-        name: normalizeOpencodeToolName(state.rawName),
-      };
-    case 'tool_result': {
-      const toolUseResult = normalizeOpencodeToolUseResult(state.rawName, state.input, rawOutput);
-      return toolUseResult
-        ? { ...chunk, toolUseResult }
-        : chunk;
-    }
-    default:
-      return chunk;
+  const queries = normalizeStringArray(action.queries ?? input.queries);
+  const query = firstNonEmptyString(action.query, input.query, queries[0]);
+  const url = firstNonEmptyString(action.url, input.url);
+  const pattern = firstNonEmptyString(action.pattern, input.pattern);
+  const explicitType = firstNonEmptyString(action.type, input.actionType, input.action_type);
+
+  const actionType = explicitType
+    || (url && pattern ? 'find_in_page' : url ? 'open_page' : (query || queries.length > 0) ? 'search' : '');
+
+  const normalized: Record<string, unknown> = {};
+  if (actionType) {
+    normalized.actionType = actionType;
   }
+  if (query) {
+    normalized.query = query;
+  }
+  if (queries.length > 0) {
+    normalized.queries = queries;
+  }
+  if (url) {
+    normalized.url = url;
+  }
+  if (pattern) {
+    normalized.pattern = pattern;
+  }
+
+  return normalized;
 }
 
 export function normalizeOpencodeToolName(rawName: string | undefined): string {
@@ -361,6 +360,8 @@ export function normalizeOpencodeToolInput(
       return firstTrimmedString(input.skill, input.name)
         ? { skill: firstTrimmedString(input.skill, input.name) }
         : {};
+    case 'websearch':
+      return normalizeWebSearchInput(input);
     default:
       return input;
   }
@@ -395,45 +396,11 @@ export function normalizeOpencodeToolUseResult(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
-export class OpencodeToolStreamAdapter {
-  private readonly toolStates = new Map<string, OpencodeToolState>();
-
-  reset(): void {
-    this.toolStates.clear();
-  }
-
-  normalizeToolCall(toolCall: AcpToolCall, chunks: StreamChunk[]): StreamChunk[] {
-    const state = updateToolState(undefined, {
-      kind: toolCall.kind,
-      rawInput: toolCall.rawInput,
-      title: toolCall.title,
-    });
-    this.toolStates.set(toolCall.toolCallId, state);
-    return chunks.map((chunk) => normalizeChunk(chunk, state, toolCall.rawOutput));
-  }
-
-  normalizeToolCallUpdate(toolCallUpdate: AcpToolCallUpdate, chunks: StreamChunk[]): StreamChunk[] {
-    const state = updateToolState(this.toolStates.get(toolCallUpdate.toolCallId), {
-      kind: toolCallUpdate.kind,
-      rawInput: toolCallUpdate.rawInput,
-      title: toolCallUpdate.title,
-    });
-    this.toolStates.set(toolCallUpdate.toolCallId, state);
-
-    const result: StreamChunk[] = [];
-    if (toolCallUpdate.rawInput !== undefined) {
-      result.push({
-        id: toolCallUpdate.toolCallId,
-        input: state.input,
-        name: normalizeOpencodeToolName(state.rawName),
-        type: 'tool_use',
-      });
-    }
-
-    for (const chunk of chunks) {
-      result.push(normalizeChunk(chunk, state, toolCallUpdate.rawOutput));
-    }
-
-    return result;
-  }
+export function createOpencodeToolStreamAdapter(): AcpToolStreamAdapter {
+  return new AcpToolStreamAdapter({
+    normalizeToolInput: normalizeOpencodeToolInput,
+    normalizeToolName: normalizeOpencodeToolName,
+    normalizeToolUseResult: normalizeOpencodeToolUseResult,
+    resolveRawToolName: resolveOpencodeRawToolName,
+  });
 }

@@ -4,6 +4,7 @@ jest.mock('../../../../src/utils/env', () => ({
 }));
 
 import {
+  DEFAULT_OPENCODE_PROVIDER_SETTINGS,
   getOpencodeProviderSettings,
   normalizeOpencodeModelAliases,
   normalizeOpencodePreferredThinkingByModel,
@@ -17,6 +18,10 @@ describe('OpenCode settings normalization', () => {
     { label: 'Anthropic/Claude Sonnet 4 (high)', rawId: 'anthropic/claude-sonnet-4/high' },
     { label: 'Google/Gemini 2.5 Pro', rawId: 'google/gemini-2.5-pro' },
   ];
+
+  it('enables Exa-backed web search in the default provider env', () => {
+    expect(DEFAULT_OPENCODE_PROVIDER_SETTINGS.environmentVariables).toBe('OPENCODE_ENABLE_EXA=1');
+  });
 
   it('normalizes visible models to base model ids', () => {
     expect(normalizeOpencodeVisibleModels([

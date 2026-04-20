@@ -50,9 +50,9 @@ export async function loadOpencodeSessionMessages(
 }
 
 export function mapOpencodeMessages(messages: StoredMessage[]): ChatMessage[] {
-  return messages
+  return mergeAdjacentAssistantMessages(messages
     .map((message) => mapStoredMessage(message))
-    .filter((message): message is ChatMessage => message !== null);
+    .filter((message): message is ChatMessage => message !== null));
 }
 
 function hydrateStoredMessages(
@@ -131,6 +131,65 @@ function mapStoredMessage(message: StoredMessage): ChatMessage | null {
     timestamp: createdAt,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
   };
+}
+
+function mergeAdjacentAssistantMessages(messages: ChatMessage[]): ChatMessage[] {
+  const merged: ChatMessage[] = [];
+
+  for (const message of messages) {
+    const previous = merged[merged.length - 1];
+    if (
+      message.role === 'assistant'
+      && previous?.role === 'assistant'
+      && !message.isInterrupt
+      && !previous.isInterrupt
+    ) {
+      previous.content += message.content;
+      previous.assistantMessageId = message.assistantMessageId ?? previous.assistantMessageId;
+      previous.durationFlavorWord = message.durationFlavorWord ?? previous.durationFlavorWord;
+      previous.durationSeconds = mergeAssistantDurationSeconds(previous, message);
+      previous.toolCalls = mergeOptionalArrays(previous.toolCalls, message.toolCalls);
+      previous.contentBlocks = mergeOptionalArrays(previous.contentBlocks, message.contentBlocks);
+      continue;
+    }
+
+    merged.push(message);
+  }
+
+  return merged;
+}
+
+function mergeOptionalArrays<T>(left?: T[], right?: T[]): T[] | undefined {
+  if (!left?.length && !right?.length) {
+    return undefined;
+  }
+
+  return [
+    ...(left ?? []),
+    ...(right ?? []),
+  ];
+}
+
+function mergeAssistantDurationSeconds(
+  first: ChatMessage,
+  next: ChatMessage,
+): number | undefined {
+  const firstEnd = getMessageCompletionTime(first);
+  const nextEnd = getMessageCompletionTime(next);
+  if (firstEnd === null && nextEnd === null) {
+    return undefined;
+  }
+
+  const end = Math.max(firstEnd ?? first.timestamp, nextEnd ?? next.timestamp);
+  return Math.max(0, (end - first.timestamp) / 1_000);
+}
+
+function getMessageCompletionTime(message: ChatMessage): number | null {
+  if (typeof message.durationSeconds !== 'number') {
+    return null;
+  }
+
+  return message.timestamp + (message.durationSeconds * 1_000);
 }
 
 function buildAssistantContentBlocks(parts: StoredRow[]): ContentBlock[] {

@@ -1,9 +1,28 @@
 import {
+  createOpencodeToolStreamAdapter,
   normalizeOpencodeToolInput,
-  OpencodeToolStreamAdapter,
 } from '../../../../src/providers/opencode/normalization/opencodeToolNormalization';
 
 describe('normalizeOpencodeToolInput', () => {
+  it('maps websearch payloads to the WebSearch renderer shape', () => {
+    expect(normalizeOpencodeToolInput('websearch', {
+      action: {
+        queries: [
+          'obsidian plugin API',
+          'obsidian docs',
+          'obsidian plugin API',
+        ],
+      },
+    })).toEqual({
+      actionType: 'search',
+      query: 'obsidian plugin API',
+      queries: [
+        'obsidian plugin API',
+        'obsidian docs',
+      ],
+    });
+  });
+
   it('maps question payloads to the AskUserQuestion renderer shape', () => {
     expect(normalizeOpencodeToolInput('question', {
       questions: [{
@@ -45,9 +64,9 @@ describe('normalizeOpencodeToolInput', () => {
   });
 });
 
-describe('OpencodeToolStreamAdapter', () => {
+describe('createOpencodeToolStreamAdapter', () => {
   it('keeps the original tool identity when completion updates replace title with a filepath', () => {
-    const adapter = new OpencodeToolStreamAdapter();
+    const adapter = createOpencodeToolStreamAdapter();
 
     expect(adapter.normalizeToolCall({
       rawInput: {},
@@ -95,7 +114,7 @@ describe('OpencodeToolStreamAdapter', () => {
   });
 
   it('attaches structured answers for question tool results', () => {
-    const adapter = new OpencodeToolStreamAdapter();
+    const adapter = createOpencodeToolStreamAdapter();
 
     adapter.normalizeToolCall({
       rawInput: {
@@ -144,6 +163,35 @@ describe('OpencodeToolStreamAdapter', () => {
         },
       },
       type: 'tool_result',
+    }]);
+  });
+
+  it('normalizes websearch tool calls to the shared WebSearch renderer contract', () => {
+    const adapter = createOpencodeToolStreamAdapter();
+
+    expect(adapter.normalizeToolCall({
+      rawInput: {
+        action: {
+          pattern: 'tools',
+          url: 'https://example.com/docs',
+        },
+      },
+      title: 'websearch',
+      toolCallId: 'tool-3',
+    }, [{
+      id: 'tool-3',
+      input: {},
+      name: 'websearch',
+      type: 'tool_use',
+    }])).toEqual([{
+      id: 'tool-3',
+      input: {
+        actionType: 'find_in_page',
+        pattern: 'tools',
+        url: 'https://example.com/docs',
+      },
+      name: 'WebSearch',
+      type: 'tool_use',
     }]);
   });
 });

@@ -2,11 +2,11 @@ import { Notice } from 'obsidian';
 
 import { ProviderRegistry } from '../../../core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
+import type { ProviderId } from '../../../core/providers/types';
 import type { ChatRuntime } from '../../../core/runtime/ChatRuntime';
-import type { SlashCommand } from '../../../core/types';
+import type { Conversation, SlashCommand } from '../../../core/types';
 import { t } from '../../../i18n/i18n';
 import type ClaudianPlugin from '../../../main';
-import { getOpencodeProviderSettings } from '../../../providers/opencode/settings';
 import { chooseForkTarget } from '../../../shared/modals/ForkTargetModal';
 import { getTabProviderId } from './providerResolution';
 import {
@@ -446,7 +446,7 @@ export class TabManager implements TabManagerInterface {
     }
   }
 
-  invalidateProviderCommandCaches(providerIds?: string | string[]): void {
+  invalidateProviderCommandCaches(providerIds?: ProviderId | ProviderId[]): void {
     const providerFilter = providerIds
       ? new Set(Array.isArray(providerIds) ? providerIds : [providerIds])
       : null;
@@ -463,7 +463,7 @@ export class TabManager implements TabManagerInterface {
     }
   }
 
-  primeProviderRuntime(providerIds?: string | string[]): void {
+  primeProviderRuntime(providerIds?: ProviderId | ProviderId[]): void {
     const providerFilter = providerIds
       ? new Set(Array.isArray(providerIds) ? providerIds : [providerIds])
       : null;
@@ -687,14 +687,11 @@ export class TabManager implements TabManagerInterface {
 
   private async ensureProviderCommandRuntime(
     tab: TabData,
-    providerId: string,
+    providerId: ProviderId,
   ): Promise<SlashCommand[]> {
-    if (providerId !== 'opencode') {
-      return [];
-    }
-
-    const settings = getOpencodeProviderSettings(this.plugin.settings as unknown as Record<string, unknown>);
-    if (!settings.enabled) {
+    const settingsBag = this.plugin.settings as unknown as Record<string, unknown>;
+    const loader = ProviderWorkspaceRegistry.getRuntimeCommandLoader(providerId);
+    if (!loader || !loader.isAvailable(settingsBag)) {
       return [];
     }
 
@@ -707,7 +704,7 @@ export class TabManager implements TabManagerInterface {
       return await existing;
     }
 
-    const warmup = this.warmOpencodeCommandRuntime(tab).finally(() => {
+    const warmup = this.warmProviderCommandRuntime(tab, providerId).finally(() => {
       if (this.providerCommandWarmups.get(tab.id) === warmup) {
         this.providerCommandWarmups.delete(tab.id);
       }
@@ -718,12 +715,9 @@ export class TabManager implements TabManagerInterface {
 
   private maybePrimeProviderRuntime(tab: TabData): void {
     const providerId = tab.service?.providerId ?? tab.providerId;
-    if (providerId !== 'opencode') {
-      return;
-    }
-
-    const settings = getOpencodeProviderSettings(this.plugin.settings as unknown as Record<string, unknown>);
-    if (!settings.enabled) {
+    const settingsBag = this.plugin.settings as unknown as Record<string, unknown>;
+    const loader = ProviderWorkspaceRegistry.getRuntimeCommandLoader(providerId);
+    if (!loader || !loader.isAvailable(settingsBag)) {
       return;
     }
 
@@ -734,61 +728,46 @@ export class TabManager implements TabManagerInterface {
     void this.ensureProviderCommandRuntime(tab, providerId).catch(() => {});
   }
 
-  private async warmOpencodeCommandRuntime(tab: TabData): Promise<SlashCommand[]> {
-    const providerId = getTabProviderId(tab, this.plugin);
-    if (providerId !== 'opencode') {
-      return [];
-    }
-
+  private async warmProviderCommandRuntime(tab: TabData, providerId: ProviderId): Promise<SlashCommand[]> {
     const catalog = ProviderWorkspaceRegistry.getCommandCatalog(providerId);
-    if (!catalog) {
+    const loader = ProviderWorkspaceRegistry.getRuntimeCommandLoader(providerId);
+    if (!catalog || !loader) {
       return [];
     }
 
-    if (tab.service?.providerId === providerId) {
-      this.providerCommandCache.delete(tab.id);
-      if (!tab.service.isReady()) {
-        await tab.service.ensureReady();
-      }
+    const conversation = await this.resolveProviderCommandConversation(tab);
+    const externalContextPaths = this.resolveProviderCommandExternalContexts(conversation);
+    const runtime = tab.service?.providerId === providerId ? tab.service : null;
+    const commands = await loader.loadCommands({
+      conversation,
+      externalContextPaths,
+      plugin: this.plugin,
+      runtime,
+    });
 
-      const commands = await tab.service.getSupportedCommands();
-      catalog.setRuntimeCommands(commands);
-      return commands;
-    }
-
-    const commands = await this.loadOpencodeCommandsWithoutBindingTab(tab);
-    if (commands.length > 0) {
+    if (commands.length > 0 && !runtime) {
       this.providerCommandCache.set(tab.id, this.cloneSlashCommands(commands));
+    } else if (runtime) {
+      this.providerCommandCache.delete(tab.id);
     }
     catalog.setRuntimeCommands(commands);
     return commands;
   }
 
-  private async loadOpencodeCommandsWithoutBindingTab(tab: TabData): Promise<SlashCommand[]> {
-    const runtime = ProviderRegistry.createChatRuntime({
-      plugin: this.plugin,
-      providerId: 'opencode',
-    });
-    try {
-      const conversation = tab.conversationId
-        ? await this.plugin.getConversationById(tab.conversationId)
-        : null;
-      if (conversation) {
-        const conversationExternalContexts = conversation.messages.length > 0
-          ? conversation.externalContextPaths ?? []
-          : this.plugin.settings.persistentExternalContextPaths ?? [];
-        runtime.syncConversationState(conversation, conversationExternalContexts);
-      }
+  private async resolveProviderCommandConversation(tab: TabData): Promise<Conversation | null> {
+    return tab.conversationId
+      ? await this.plugin.getConversationById(tab.conversationId)
+      : null;
+  }
 
-      const ready = await runtime.ensureReady();
-      if (!ready) {
-        return [];
-      }
-
-      return await runtime.getSupportedCommands();
-    } finally {
-      runtime.cleanup();
+  private resolveProviderCommandExternalContexts(conversation: Conversation | null): string[] {
+    if (!conversation) {
+      return this.plugin.settings.persistentExternalContextPaths ?? [];
     }
+
+    return conversation.messages.length > 0
+      ? conversation.externalContextPaths ?? []
+      : this.plugin.settings.persistentExternalContextPaths ?? [];
   }
 
   // ============================================

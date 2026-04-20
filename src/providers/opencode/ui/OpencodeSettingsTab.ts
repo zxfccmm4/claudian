@@ -15,6 +15,7 @@ import {
 import {
   getOpencodeProviderSettings,
   normalizeOpencodeVisibleModels,
+  OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
   updateOpencodeProviderSettings,
 } from '../settings';
 
@@ -516,8 +517,8 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
       scope: 'provider:opencode',
       heading: 'Environment',
       name: 'Environment Variables',
-      desc: 'Extra environment variables passed to OpenCode.',
-      placeholder: 'OPENCODE_DB=/path/to/opencode.db',
+      desc: 'Extra environment variables passed to OpenCode. `OPENCODE_ENABLE_EXA=1` is enabled by default.',
+      placeholder: `${OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES}\nOPENCODE_DB=/path/to/opencode.db`,
       renderCustomContextLimits: (target) => context.renderCustomContextLimits(target, 'opencode'),
     });
   },

@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 
+import { OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES } from '@/providers/opencode/settings';
 import { opencodeSettingsTabRenderer } from '@/providers/opencode/ui/OpencodeSettingsTab';
 
 const mockGetHostnameKey = jest.fn(() => 'host-a');
@@ -257,7 +258,7 @@ function createPlugin(overrides: Record<string, unknown> = {}): any {
           cliPathsByHost: {},
           discoveredModels: [],
           enabled: true,
-          environmentVariables: '',
+          environmentVariables: OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
           modelAliases: {},
           preferredThinkingByModel: {},
           selectedMode: '',
@@ -342,5 +343,16 @@ describe('OpencodeSettingsTab', () => {
       tag: 'p',
       text: 'OpenCode can auto-detect vault-level Claude slash commands from .claude/commands/ and skills from .claude/skills/, .codex/skills/, and .agents/skills/. Manage those entries in the Claude or Codex settings tab. This setting only hides entries from the OpenCode dropdown.',
     });
+  });
+
+  it('passes the default Exa env var into the environment section copy', () => {
+    const plugin = createPlugin();
+
+    opencodeSettingsTabRenderer.render(createContainer(), createContext(plugin));
+
+    expect(mockRenderEnvironmentSettingsSection).toHaveBeenCalledWith(expect.objectContaining({
+      desc: expect.stringContaining(OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES),
+      placeholder: `${OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES}\nOPENCODE_DB=/path/to/opencode.db`,
+    }));
   });
 });

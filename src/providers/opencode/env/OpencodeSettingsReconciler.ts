@@ -1,5 +1,6 @@
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import type { Conversation } from '../../../core/types';
+import { clearOpencodeDiscoveryState } from '../discoveryState';
 import {
   decodeOpencodeModelId,
   encodeOpencodeModelId,
@@ -17,6 +18,10 @@ import {
 } from '../settings';
 
 export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
+  handleEnvironmentChange(settings: Record<string, unknown>): boolean {
+    return clearOpencodeDiscoveryState(settings);
+  },
+
   reconcileModelWithEnvironment(
     _settings: Record<string, unknown>,
     _conversations: Conversation[],

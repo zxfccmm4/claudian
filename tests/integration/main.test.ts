@@ -357,6 +357,7 @@ describe('ClaudianPlugin', () => {
       };
       const mockView = {
         getTabManager: jest.fn().mockReturnValue(mockTabManager),
+        invalidateProviderCommandCaches: jest.fn(),
         refreshModelSelector: jest.fn(),
       };
       jest.spyOn(plugin, 'getView').mockReturnValue(mockView as any);

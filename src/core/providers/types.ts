@@ -70,6 +70,8 @@ export interface ProviderRegistration {
 }
 
 export interface ProviderSettingsReconciler {
+  handleEnvironmentChange?(settings: Record<string, unknown>): boolean;
+
   reconcileModelWithEnvironment(
     settings: Record<string, unknown>,
     conversations: Conversation[],
@@ -284,10 +286,23 @@ export interface ProviderCliResolver {
   reset(): void;
 }
 
+export interface ProviderRuntimeCommandLoaderContext {
+  conversation: Conversation | null;
+  externalContextPaths: string[];
+  plugin: ClaudianPlugin;
+  runtime: ChatRuntime | null;
+}
+
+export interface ProviderRuntimeCommandLoader {
+  isAvailable(settings: Record<string, unknown>): boolean;
+  loadCommands(context: ProviderRuntimeCommandLoaderContext): Promise<SlashCommand[]>;
+}
+
 export interface ProviderWorkspaceServices {
   commandCatalog?: ProviderCommandCatalog | null;
   agentMentionProvider?: AgentMentionProvider | null;
   cliResolver?: ProviderCliResolver | null;
+  runtimeCommandLoader?: ProviderRuntimeCommandLoader | null;
   mcpServerManager?: McpServerManager | null;
   settingsTabRenderer?: ProviderSettingsTabRenderer | null;
   refreshAgentMentions?(): Promise<void>;

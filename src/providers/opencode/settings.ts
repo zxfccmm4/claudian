@@ -36,11 +36,13 @@ export interface OpencodeProviderSettings extends PersistedOpencodeProviderSetti
   discoveredModels: OpencodeDiscoveredModel[];
 }
 
+export const OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES = 'OPENCODE_ENABLE_EXA=1';
+
 export const DEFAULT_OPENCODE_PROVIDER_SETTINGS: Readonly<PersistedOpencodeProviderSettings> = Object.freeze({
   cliPath: '',
   cliPathsByHost: {},
   enabled: false,
-  environmentVariables: '',
+  environmentVariables: OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
   modelAliases: {},
   preferredThinkingByModel: {},
   selectedMode: '',

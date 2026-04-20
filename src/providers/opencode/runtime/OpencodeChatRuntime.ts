@@ -54,6 +54,8 @@ import {
   type AcpUsageUpdate,
   type AcpWriteTextFileRequest,
   buildAcpUsageInfo,
+  extractAcpSessionModelState,
+  extractAcpSessionModeState,
 } from '../../acp';
 import { OPENCODE_PROVIDER_CAPABILITIES } from '../capabilities';
 import { updateOpencodeDiscoveryState } from '../discoveryState';
@@ -62,19 +64,19 @@ import {
   decodeOpencodeModelId,
   encodeOpencodeModelId,
   extractOpencodeModelVariantValue,
-  extractOpencodeSessionModelState,
   isOpencodeModelSelectionId,
+  normalizeOpencodeDiscoveredModels,
   OPENCODE_DEFAULT_THINKING_LEVEL,
   OPENCODE_SYNTHETIC_MODEL_ID,
   type OpencodeDiscoveredModel,
   resolveOpencodeBaseModelRawId,
 } from '../models';
 import {
-  extractOpencodeSessionModeState,
   getOpencodeToolbarModes,
+  normalizeOpencodeAvailableModes,
   type OpencodeMode,
 } from '../modes';
-import { OpencodeToolStreamAdapter } from '../normalization/opencodeToolNormalization';
+import { createOpencodeToolStreamAdapter } from '../normalization/opencodeToolNormalization';
 import { getOpencodeProviderSettings, updateOpencodeProviderSettings } from '../settings';
 import { getOpencodeState, type OpencodeProviderState } from '../types';
 import { buildOpencodePromptBlocks, buildOpencodePromptText } from './buildOpencodePrompt';
@@ -148,7 +150,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
   private sessionCwds = new Map<string, string>();
   private sessionId: string | null = null;
   private readonly sessionUpdateNormalizer = new AcpSessionUpdateNormalizer();
-  private readonly toolStreamAdapter = new OpencodeToolStreamAdapter();
+  private readonly toolStreamAdapter = createOpencodeToolStreamAdapter();
   private transport: AcpJsonRpcTransport | null = null;
 
   constructor(
@@ -766,7 +768,17 @@ export class OpencodeChatRuntime implements ChatRuntime {
     configOptions?: AcpSessionConfigOption[] | null;
     models?: AcpSessionModelState | null;
   }): Promise<void> {
-    const state = extractOpencodeSessionModelState(params);
+    const acpState = extractAcpSessionModelState(params);
+    const state = {
+      currentRawModelId: acpState.currentModelId,
+      discoveredModels: normalizeOpencodeDiscoveredModels(
+        acpState.availableModels.map((model) => ({
+          ...(model.description ? { description: model.description } : {}),
+          label: model.name,
+          rawId: model.id,
+        })),
+      ),
+    };
     if (state.currentRawModelId) {
       this.currentSessionModelId = state.currentRawModelId;
     }
@@ -860,7 +872,11 @@ export class OpencodeChatRuntime implements ChatRuntime {
     currentModeId?: string | null;
     modes?: AcpSessionModeState | null;
   }): Promise<void> {
-    const state = extractOpencodeSessionModeState(params);
+    const acpState = extractAcpSessionModeState(params);
+    const state = {
+      availableModes: normalizeOpencodeAvailableModes(acpState.availableModes),
+      currentModeId: acpState.currentModeId,
+    };
     const currentModeId = params.currentModeId ?? state.currentModeId;
     if (currentModeId) {
       this.currentSessionModeId = currentModeId;

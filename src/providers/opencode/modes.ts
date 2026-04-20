@@ -1,18 +1,7 @@
-import type {
-  AcpSessionConfigOption,
-  AcpSessionModeState,
-} from '../acp';
-import { flattenOpencodeSelectOptions } from './configOptions';
-
 export interface OpencodeMode {
   description?: string;
   id: string;
   name: string;
-}
-
-export interface OpencodeSessionModeState {
-  availableModes: OpencodeMode[];
-  currentModeId: string | null;
 }
 
 export const OPENCODE_FALLBACK_MODES: ReadonlyArray<OpencodeMode> = Object.freeze([
@@ -84,42 +73,4 @@ export function normalizeOpencodeSelectedMode(
   }
 
   return trimmed;
-}
-
-export function extractOpencodeSessionModeState(params: {
-  configOptions?: AcpSessionConfigOption[] | null;
-  modes?: AcpSessionModeState | null;
-}): OpencodeSessionModeState {
-  const fromConfig = extractFromConfigOptions(params.configOptions ?? null);
-  if (fromConfig.availableModes.length > 0) {
-    return fromConfig;
-  }
-
-  return {
-    availableModes: normalizeOpencodeAvailableModes(params.modes?.availableModes ?? []),
-    currentModeId: params.modes?.currentModeId ?? null,
-  };
-}
-
-function extractFromConfigOptions(
-  configOptions: AcpSessionConfigOption[] | null,
-): OpencodeSessionModeState {
-  const modeOption = configOptions?.find((option) => option.id === 'mode' && option.type === 'select');
-  if (!modeOption || modeOption.type !== 'select') {
-    return {
-      availableModes: [],
-      currentModeId: null,
-    };
-  }
-
-  return {
-    availableModes: normalizeOpencodeAvailableModes(
-      flattenOpencodeSelectOptions(modeOption.options).map((option) => ({
-        description: option.description ?? undefined,
-        id: option.value,
-        name: option.name,
-      })),
-    ),
-    currentModeId: modeOption.currentValue,
-  };
 }

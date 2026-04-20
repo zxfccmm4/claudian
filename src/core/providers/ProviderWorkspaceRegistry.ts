@@ -5,6 +5,7 @@ import type {
   AgentMentionProvider,
   ProviderCliResolver,
   ProviderId,
+  ProviderRuntimeCommandLoader,
   ProviderSettingsTabRenderer,
   ProviderWorkspaceRegistration,
   ProviderWorkspaceServices,
@@ -97,6 +98,10 @@ export class ProviderWorkspaceRegistry {
 
   static getCliResolver(providerId: ProviderId): ProviderCliResolver | null {
     return this.getServices(providerId)?.cliResolver ?? null;
+  }
+
+  static getRuntimeCommandLoader(providerId: ProviderId): ProviderRuntimeCommandLoader | null {
+    return this.getServices(providerId)?.runtimeCommandLoader ?? null;
   }
 
   static getMcpServerManager(providerId: ProviderId) {

@@ -70,6 +70,24 @@ function normalizeReasoningValue(
 }
 
 export class ProviderSettingsCoordinator {
+  static handleEnvironmentChange(
+    settings: Record<string, unknown>,
+    providerIds: ProviderId[],
+  ): boolean {
+    let anyChanged = false;
+
+    for (const providerId of providerIds) {
+      const changed = ProviderRegistry
+        .getSettingsReconciler(providerId)
+        .handleEnvironmentChange?.(settings) ?? false;
+      if (changed) {
+        anyChanged = true;
+      }
+    }
+
+    return anyChanged;
+  }
+
   static reconcileTitleGenerationModelSelection(settings: Record<string, unknown>): boolean {
     const currentModel = typeof settings.titleGenerationModel === 'string'
       ? settings.titleGenerationModel

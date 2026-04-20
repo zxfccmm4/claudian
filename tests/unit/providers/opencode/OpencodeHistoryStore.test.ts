@@ -155,4 +155,108 @@ describe('mapOpencodeMessages', () => {
       },
     ]);
   });
+
+  it('merges adjacent assistant fragments from one OpenCode turn', () => {
+    const messages = mapOpencodeMessages([
+      {
+        info: {
+          id: 'msg-user',
+          role: 'user',
+          time: { created: 1_000 },
+        },
+        parts: [
+          {
+            id: 'part-user',
+            text: 'Search it',
+            type: 'text',
+          },
+        ],
+      },
+      {
+        info: {
+          id: 'msg-assistant-1',
+          role: 'assistant',
+          time: { created: 2_000, completed: 4_000 },
+        },
+        parts: [
+          {
+            id: 'part-thinking-1',
+            text: 'Searching...',
+            time: { start: 2_000, end: 3_000 },
+            type: 'reasoning',
+          },
+          {
+            callID: 'tool-websearch',
+            id: 'part-tool',
+            state: {
+              input: {
+                action: {
+                  query: 'Apple stock price today',
+                },
+              },
+              output: 'Search complete',
+              status: 'completed',
+            },
+            tool: 'websearch',
+            type: 'tool',
+          },
+        ],
+      },
+      {
+        info: {
+          id: 'msg-assistant-2',
+          role: 'assistant',
+          time: { created: 4_500, completed: 7_000 },
+        },
+        parts: [
+          {
+            id: 'part-thinking-2',
+            text: 'Summarizing...',
+            time: { start: 4_500, end: 5_000 },
+            type: 'reasoning',
+          },
+          {
+            id: 'part-text',
+            text: 'Apple is trading at $272.41.',
+            type: 'text',
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toEqual([
+      {
+        assistantMessageId: undefined,
+        content: 'Search it',
+        id: 'msg-user',
+        role: 'user',
+        timestamp: 1_000,
+        userMessageId: 'msg-user',
+      },
+      {
+        assistantMessageId: 'msg-assistant-2',
+        content: 'Apple is trading at $272.41.',
+        contentBlocks: [
+          { content: 'Searching...', durationSeconds: 1, type: 'thinking' },
+          { toolId: 'tool-websearch', type: 'tool_use' },
+          { content: 'Summarizing...', durationSeconds: 0.5, type: 'thinking' },
+          { content: 'Apple is trading at $272.41.', type: 'text' },
+        ],
+        durationSeconds: 5,
+        id: 'msg-assistant-1',
+        role: 'assistant',
+        timestamp: 2_000,
+        toolCalls: [{
+          id: 'tool-websearch',
+          input: {
+            actionType: 'search',
+            query: 'Apple stock price today',
+          },
+          name: 'WebSearch',
+          result: 'Search complete',
+          status: 'completed',
+        }],
+      },
+    ]);
+  });
 });

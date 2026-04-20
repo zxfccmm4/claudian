@@ -1,3 +1,4 @@
+import { getOpencodeDiscoveryState, updateOpencodeDiscoveryState } from '../../../../src/providers/opencode/discoveryState';
 import { opencodeSettingsReconciler } from '../../../../src/providers/opencode/env/OpencodeSettingsReconciler';
 
 describe('opencodeSettingsReconciler.normalizeModelVariantSettings', () => {
@@ -33,6 +34,22 @@ describe('opencodeSettingsReconciler.normalizeModelVariantSettings', () => {
         opencode: 'opencode:anthropic/claude-sonnet-4',
       },
       titleGenerationModel: 'opencode:anthropic/claude-sonnet-4',
+    });
+  });
+});
+
+describe('opencodeSettingsReconciler.handleEnvironmentChange', () => {
+  it('clears provider-owned discovery state when environment changes', () => {
+    const settings: Record<string, unknown> = {};
+    updateOpencodeDiscoveryState(settings, {
+      availableModes: [{ id: 'build', name: 'Build' }],
+      discoveredModels: [{ label: 'OpenAI/GPT-5', rawId: 'openai/gpt-5' }],
+    });
+
+    expect(opencodeSettingsReconciler.handleEnvironmentChange?.(settings)).toBe(true);
+    expect(getOpencodeDiscoveryState(settings)).toEqual({
+      availableModes: [],
+      discoveredModels: [],
     });
   });
 });

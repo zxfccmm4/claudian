@@ -1,5 +1,4 @@
 import {
-  extractOpencodeSessionModeState,
   getEffectiveOpencodeModes,
   getOpencodeToolbarModes,
   normalizeOpencodeAvailableModes,
@@ -7,50 +6,6 @@ import {
   OPENCODE_FALLBACK_MODES,
 } from '../../../../src/providers/opencode/modes';
 import { opencodeChatUIConfig } from '../../../../src/providers/opencode/ui/OpencodeChatUIConfig';
-
-describe('extractOpencodeSessionModeState', () => {
-  it('prefers ACP config options when mode metadata is available there', () => {
-    expect(extractOpencodeSessionModeState({
-      configOptions: [
-        {
-          category: 'mode',
-          currentValue: 'plan',
-          id: 'mode',
-          name: 'Mode',
-          options: [
-            { description: 'Default editing agent', name: 'Build', value: 'build' },
-            { description: 'Planning-first agent', name: 'Plan', value: 'plan' },
-          ],
-          type: 'select',
-        },
-      ],
-    })).toEqual({
-      availableModes: [
-        { description: 'Default editing agent', id: 'build', name: 'Build' },
-        { description: 'Planning-first agent', id: 'plan', name: 'Plan' },
-      ],
-      currentModeId: 'plan',
-    });
-  });
-
-  it('falls back to ACP mode state when config options are unavailable', () => {
-    expect(extractOpencodeSessionModeState({
-      modes: {
-        availableModes: [
-          { id: 'build', name: 'Build' },
-          { description: 'Planning-first agent', id: 'plan', name: 'Plan' },
-        ],
-        currentModeId: 'build',
-      },
-    })).toEqual({
-      availableModes: [
-        { id: 'build', name: 'Build' },
-        { description: 'Planning-first agent', id: 'plan', name: 'Plan' },
-      ],
-      currentModeId: 'build',
-    });
-  });
-});
 
 describe('OpenCode mode settings', () => {
   it('normalizes duplicate/invalid mode entries', () => {
