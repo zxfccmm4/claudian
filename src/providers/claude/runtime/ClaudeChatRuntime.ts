@@ -37,7 +37,6 @@ import type {
   AutoTurnResult,
   ChatRewindResult,
   ChatRuntimeConversationState,
-  ChatRuntimeEnsureReadyOptions,
   ChatRuntimeQueryOptions,
   ChatTurnMetadata,
   ChatTurnRequest,
@@ -410,8 +409,6 @@ export class ClaudianService implements ChatRuntime {
    *
    * @returns true if the query was (re)started, false otherwise
    */
-  async ensureReady(options?: ChatRuntimeEnsureReadyOptions): Promise<boolean>;
-  async ensureReady(options?: ClaudeEnsureReadyOptions): Promise<boolean>;
   async ensureReady(options?: ClaudeEnsureReadyOptions): Promise<boolean> {
     const vaultPath = getVaultPath(this.plugin.app);
 

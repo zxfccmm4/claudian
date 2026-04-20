@@ -9,6 +9,7 @@ import type {
   ProviderPermissionModeToggleConfig,
   ProviderReasoningOption,
   ProviderServiceTierToggleConfig,
+  ProviderUIOption,
 } from '../../../core/providers/types';
 import type {
   ManagedMcpServer,
@@ -155,6 +156,18 @@ export class ModeSelector {
     this.updateDisplay();
   }
 
+  /** Resolves the active/inactive option pair for a two-option toggle. */
+  private resolveOptionPair(
+    selectorConfig: ProviderModeSelectorConfig,
+  ): { active: ProviderUIOption; inactive: ProviderUIOption } {
+    const [first, second] = selectorConfig.options;
+    const active = selectorConfig.activeValue
+      ? selectorConfig.options.find((option) => option.value === selectorConfig.activeValue) ?? second
+      : second;
+    const inactive = active.value === first.value ? second : first;
+    return { active, inactive };
+  }
+
   updateDisplay() {
     if (!this.toggleEl || !this.labelEl) {
       return;
@@ -167,14 +180,10 @@ export class ModeSelector {
     }
 
     this.container.style.display = '';
-    const options = selectorConfig.options;
-    const inactiveOption = options[0];
-    const activeOption = selectorConfig.activeValue
-      ? options.find((option) => option.value === selectorConfig.activeValue) ?? options[1]
-      : options[1];
-    const currentOption = options.find((option) => option.value === selectorConfig.value)
+    const { active, inactive } = this.resolveOptionPair(selectorConfig);
+    const currentOption = selectorConfig.options.find((option) => option.value === selectorConfig.value)
       ?? selectorConfig.options[0];
-    const isActive = currentOption.value === activeOption.value;
+    const isActive = currentOption.value === active.value;
 
     this.labelEl.setText(currentOption.label || selectorConfig.label);
     this.labelEl.toggleClass('active', isActive);
@@ -184,9 +193,7 @@ export class ModeSelector {
       this.toggleEl.removeClass('active');
     }
 
-    const titleParts = [
-      `${inactiveOption.label} <-> ${activeOption.label}`,
-    ];
+    const titleParts = [`${inactive.label} <-> ${active.label}`];
     if (currentOption.description) {
       titleParts.push(currentOption.description);
     }
@@ -203,16 +210,8 @@ export class ModeSelector {
       return;
     }
 
-    const [inactiveOption, activeOption] = selectorConfig.options;
-    const resolvedActiveOption = selectorConfig.activeValue
-      ? selectorConfig.options.find((option) => option.value === selectorConfig.activeValue) ?? activeOption
-      : activeOption;
-    const resolvedInactiveOption = inactiveOption.value === resolvedActiveOption.value
-      ? selectorConfig.options.find((option) => option.value !== resolvedActiveOption.value) ?? inactiveOption
-      : inactiveOption;
-    const nextValue = selectorConfig.value === resolvedActiveOption.value
-      ? resolvedInactiveOption.value
-      : resolvedActiveOption.value;
+    const { active, inactive } = this.resolveOptionPair(selectorConfig);
+    const nextValue = selectorConfig.value === active.value ? inactive.value : active.value;
     await this.callbacks.onModeChange(nextValue);
     this.updateDisplay();
   }

@@ -66,16 +66,17 @@ export interface AcpToolCallSnapshot {
   status?: AcpToolCallStatus | null;
 }
 
+type MessageRole = 'assistant' | 'thinking' | 'user';
+
+// Sentinel key for anonymous (messageId-less) streams so we only emit one start per role.
+const ANONYMOUS_MESSAGE_KEY = '\u0000anonymous';
+
 export class AcpSessionUpdateNormalizer {
-  private readonly seenAssistantMessages = new Set<string>();
-  private readonly seenAnonymousRoles = new Set<'assistant' | 'user'>();
-  private readonly seenUserMessages = new Set<string>();
+  private readonly seenMessages = new Map<MessageRole, Set<string>>();
   private readonly toolCalls = new Map<string, AcpToolCallSnapshot>();
 
   reset(): void {
-    this.seenAssistantMessages.clear();
-    this.seenAnonymousRoles.clear();
-    this.seenUserMessages.clear();
+    this.seenMessages.clear();
     this.toolCalls.clear();
   }
 
@@ -99,46 +100,32 @@ export class AcpSessionUpdateNormalizer {
           type: 'commands',
         };
       case 'current_mode_update':
-        return {
-          currentModeId: update.currentModeId,
-          type: 'current_mode',
-        };
+        return { currentModeId: update.currentModeId, type: 'current_mode' };
       case 'config_option_update':
-        return {
-          configOptions: update.configOptions,
-          type: 'config_options',
-        };
+        return { configOptions: update.configOptions, type: 'config_options' };
       case 'session_info_update':
         return {
-          sessionInfo: {
-            ...update,
-            updatedAtMs: parseIsoDate(update.updatedAt),
-          },
+          sessionInfo: { ...update, updatedAtMs: parseIsoDate(update.updatedAt) },
           type: 'session_info',
         };
       case 'usage_update':
-        return {
-          type: 'usage',
-          usage: update,
-        };
+        return { type: 'usage', usage: update };
     }
   }
 
   private normalizeMessageChunk(
-    role: 'assistant' | 'thinking' | 'user',
+    role: MessageRole,
     update: AcpContentChunk,
   ): Extract<AcpNormalizedUpdate, { type: 'message_chunk' }> {
     const streamChunks: StreamChunk[] = [];
 
-    if (role === 'user' && this.shouldStartUserMessage(update.messageId)) {
+    if (role === 'user' && this.claimMessageStart('user', update.messageId)) {
       streamChunks.push({
         content: extractPrimaryText(update.content),
         itemId: update.messageId ?? undefined,
         type: 'user_message_start',
       });
-    }
-
-    if (role === 'assistant' && this.shouldStartAssistantMessage(update.messageId)) {
+    } else if (role === 'assistant' && this.claimMessageStart('assistant', update.messageId)) {
       streamChunks.push({
         itemId: update.messageId ?? undefined,
         type: 'assistant_message_start',
@@ -146,12 +133,10 @@ export class AcpSessionUpdateNormalizer {
     }
 
     const text = renderAcpContentBlock(update.content);
-    if (text) {
-      if (role === 'thinking') {
-        streamChunks.push({ content: text, type: 'thinking' });
-      } else if (role === 'assistant') {
-        streamChunks.push({ content: text, type: 'text' });
-      }
+    if (text && role === 'thinking') {
+      streamChunks.push({ content: text, type: 'thinking' });
+    } else if (text && role === 'assistant') {
+      streamChunks.push({ content: text, type: 'text' });
     }
 
     return {
@@ -188,12 +173,7 @@ export class AcpSessionUpdateNormalizer {
       });
     }
 
-    return {
-      streamChunks,
-      toolCall,
-      toolState,
-      type: 'tool_call',
-    };
+    return { streamChunks, toolCall, toolState, type: 'tool_call' };
   }
 
   private normalizeToolCallUpdate(
@@ -220,6 +200,7 @@ export class AcpSessionUpdateNormalizer {
       || current.output;
     const streamChunks: StreamChunk[] = [];
 
+    // Emit only the delta so the UI can append incrementally without re-rendering prior output.
     if (nextOutput.length > current.output.length && nextOutput.startsWith(current.output)) {
       streamChunks.push({
         content: nextOutput.slice(current.output.length),
@@ -252,35 +233,19 @@ export class AcpSessionUpdateNormalizer {
     };
   }
 
-  private shouldStartUserMessage(messageId?: string | null): boolean {
-    if (messageId) {
-      if (this.seenUserMessages.has(messageId)) {
-        return false;
-      }
-      this.seenUserMessages.add(messageId);
-      return true;
+  // A message-start chunk must fire exactly once per (role, messageId). Anonymous streams
+  // share a single slot per role so repeated chunks without an id do not restart the message.
+  private claimMessageStart(role: 'assistant' | 'user', messageId?: string | null): boolean {
+    const key = messageId ?? ANONYMOUS_MESSAGE_KEY;
+    let seen = this.seenMessages.get(role);
+    if (!seen) {
+      seen = new Set();
+      this.seenMessages.set(role, seen);
     }
-
-    if (this.seenAnonymousRoles.has('user')) {
+    if (seen.has(key)) {
       return false;
     }
-    this.seenAnonymousRoles.add('user');
-    return true;
-  }
-
-  private shouldStartAssistantMessage(messageId?: string | null): boolean {
-    if (messageId) {
-      if (this.seenAssistantMessages.has(messageId)) {
-        return false;
-      }
-      this.seenAssistantMessages.add(messageId);
-      return true;
-    }
-
-    if (this.seenAnonymousRoles.has('assistant')) {
-      return false;
-    }
-    this.seenAnonymousRoles.add('assistant');
+    seen.add(key);
     return true;
   }
 }
@@ -297,10 +262,7 @@ function mapAcpCommandToSlashCommand(command: AcpAvailableCommand): SlashCommand
   };
 }
 
-function normalizeToolName(
-  title?: string | null,
-  kind?: string | null,
-): string {
+function normalizeToolName(title?: string | null, kind?: string | null): string {
   return title?.trim() || kind?.trim() || 'tool';
 }
 
@@ -325,11 +287,7 @@ function renderToolPayload(
       .join('\n\n');
   }
 
-  if (rawOutput !== undefined) {
-    return formatUnknownValue(rawOutput);
-  }
-
-  return '';
+  return rawOutput === undefined ? '' : formatUnknownValue(rawOutput);
 }
 
 function renderToolCallContent(content: AcpToolCallContent): string {
@@ -347,18 +305,16 @@ function defaultToolResultText(status: AcpToolCallStatus): string {
   return status === 'failed' ? 'Tool failed' : 'Tool completed';
 }
 
+// User-visible preview text for the first chunk of a user message. Non-textual blocks
+// show nothing here because they round-trip through the message content itself.
 function extractPrimaryText(content: AcpContentBlock): string {
-  switch (content.type) {
-    case 'text':
-      return content.text;
-    case 'resource':
-      if ('text' in content.resource) {
-        return content.resource.text;
-      }
-      return '';
-    default:
-      return '';
+  if (content.type === 'text') {
+    return content.text;
   }
+  if (content.type === 'resource' && 'text' in content.resource) {
+    return content.resource.text;
+  }
+  return '';
 }
 
 export function renderAcpContentBlock(content: AcpContentBlock): string {
@@ -372,10 +328,9 @@ export function renderAcpContentBlock(content: AcpContentBlock): string {
     case 'resource_link':
       return content.title || content.name || content.uri;
     case 'resource':
-      if ('text' in content.resource) {
-        return content.resource.text;
-      }
-      return `[resource: ${content.resource.uri}]`;
+      return 'text' in content.resource
+        ? content.resource.text
+        : `[resource: ${content.resource.uri}]`;
   }
 }
 
@@ -403,6 +358,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+// Tri-state: undefined when the field is absent, null when present but unparseable, number on success.
 function parseIsoDate(value?: string | null): number | null | undefined {
   if (value === undefined) {
     return undefined;

@@ -60,6 +60,13 @@ import {
 import { OPENCODE_PROVIDER_CAPABILITIES } from '../capabilities';
 import { updateOpencodeDiscoveryState } from '../discoveryState';
 import {
+  sameDiscoveredModels,
+  sameModes,
+  sameStringList,
+  sameStringMap,
+} from '../internal/compareCollections';
+import { ensureProviderProjectionMap } from '../internal/providerProjection';
+import {
   combineOpencodeRawModelSelection,
   decodeOpencodeModelId,
   encodeOpencodeModelId,
@@ -68,13 +75,11 @@ import {
   normalizeOpencodeDiscoveredModels,
   OPENCODE_DEFAULT_THINKING_LEVEL,
   OPENCODE_SYNTHETIC_MODEL_ID,
-  type OpencodeDiscoveredModel,
   resolveOpencodeBaseModelRawId,
 } from '../models';
 import {
   getOpencodeToolbarModes,
   normalizeOpencodeAvailableModes,
-  type OpencodeMode,
 } from '../modes';
 import { createOpencodeToolStreamAdapter } from '../normalization/opencodeToolNormalization';
 import { getOpencodeProviderSettings, updateOpencodeProviderSettings } from '../settings';
@@ -465,17 +470,11 @@ export class OpencodeChatRuntime implements ChatRuntime {
     this.approvalCallback = callback;
   }
 
-  setApprovalDismisser(dismisser: (() => void) | null): void {
-    void dismisser;
-  }
+  setApprovalDismisser(_dismisser: (() => void) | null): void {}
 
-  setAskUserQuestionCallback(callback: AskUserQuestionCallback | null): void {
-    void callback;
-  }
+  setAskUserQuestionCallback(_callback: AskUserQuestionCallback | null): void {}
 
-  setExitPlanModeCallback(callback: ExitPlanModeCallback | null): void {
-    void callback;
-  }
+  setExitPlanModeCallback(_callback: ExitPlanModeCallback | null): void {}
 
   setPermissionModeSyncCallback(_callback: ((sdkMode: string) => void) | null): void {}
 
@@ -769,28 +768,25 @@ export class OpencodeChatRuntime implements ChatRuntime {
     models?: AcpSessionModelState | null;
   }): Promise<void> {
     const acpState = extractAcpSessionModelState(params);
-    const state = {
-      currentRawModelId: acpState.currentModelId,
-      discoveredModels: normalizeOpencodeDiscoveredModels(
-        acpState.availableModels.map((model) => ({
-          ...(model.description ? { description: model.description } : {}),
-          label: model.name,
-          rawId: model.id,
-        })),
-      ),
-    };
-    if (state.currentRawModelId) {
-      this.currentSessionModelId = state.currentRawModelId;
+    const currentRawModelId = acpState.currentModelId;
+    const discoveredModels = normalizeOpencodeDiscoveredModels(
+      acpState.availableModels.map((model) => ({
+        ...(model.description ? { description: model.description } : {}),
+        label: model.name,
+        rawId: model.id,
+      })),
+    );
+    if (currentRawModelId) {
+      this.currentSessionModelId = currentRawModelId;
     }
 
     const settingsBag = this.plugin.settings as unknown as Record<string, unknown>;
     const currentSettings = getOpencodeProviderSettings(settingsBag);
-    const hasDiscoveredModels = state.discoveredModels.length > 0;
-    const currentBaseRawModelId = state.currentRawModelId
-      ? resolveOpencodeBaseModelRawId(state.currentRawModelId, state.discoveredModels)
+    const currentBaseRawModelId = currentRawModelId
+      ? resolveOpencodeBaseModelRawId(currentRawModelId, discoveredModels)
       : null;
-    const currentThinkingLevel = state.currentRawModelId
-      ? extractOpencodeModelVariantValue(state.currentRawModelId, state.discoveredModels)
+    const currentThinkingLevel = currentRawModelId
+      ? extractOpencodeModelVariantValue(currentRawModelId, discoveredModels)
       : null;
     const nextVisibleModels = currentSettings.visibleModels.length === 0 && currentBaseRawModelId
       ? [currentBaseRawModelId]
@@ -801,60 +797,30 @@ export class OpencodeChatRuntime implements ChatRuntime {
         [currentBaseRawModelId]: currentThinkingLevel,
       }
       : currentSettings.preferredThinkingByModel;
-    const shouldUpdateDiscoveredModels = hasDiscoveredModels
-      && !sameDiscoveredModels(currentSettings.discoveredModels, state.discoveredModels);
-    const shouldSeedVisibleModels = !sameVisibleModels(currentSettings.visibleModels, nextVisibleModels);
+    const shouldSeedVisibleModels = !sameStringList(currentSettings.visibleModels, nextVisibleModels);
     const shouldSeedPreferredThinking = !sameStringMap(
       currentSettings.preferredThinkingByModel,
       nextPreferredThinkingByModel,
     );
-    const discoveryChanged = shouldUpdateDiscoveredModels
-      ? updateOpencodeDiscoveryState(settingsBag, { discoveredModels: state.discoveredModels })
-      : false;
+    const discoveryChanged = discoveredModels.length > 0
+      && !sameDiscoveredModels(currentSettings.discoveredModels, discoveredModels)
+      && updateOpencodeDiscoveryState(settingsBag, { discoveredModels });
     let changed = shouldSeedVisibleModels || shouldSeedPreferredThinking;
 
-    if (shouldSeedVisibleModels || shouldSeedPreferredThinking) {
+    if (changed) {
       updateOpencodeProviderSettings(settingsBag, {
         ...(shouldSeedPreferredThinking ? { preferredThinkingByModel: nextPreferredThinkingByModel } : {}),
         ...(shouldSeedVisibleModels ? { visibleModels: nextVisibleModels } : {}),
       });
     }
 
-    const currentModelSelection = currentBaseRawModelId
-      ? encodeOpencodeModelId(currentBaseRawModelId)
-      : null;
-    if (currentModelSelection) {
-      const savedProviderModel = ensureProviderProjectionMap(settingsBag, 'savedProviderModel');
-      const savedModel = typeof savedProviderModel.opencode === 'string'
-        ? savedProviderModel.opencode
-        : '';
-      const savedProviderEffort = ensureProviderProjectionMap(settingsBag, 'savedProviderEffort');
-      const savedEffort = typeof savedProviderEffort.opencode === 'string'
-        ? savedProviderEffort.opencode
-        : '';
-
-      if (!savedModel || savedModel === OPENCODE_SYNTHETIC_MODEL_ID) {
-        savedProviderModel.opencode = currentModelSelection;
-        changed = true;
-      }
-
-      if (currentThinkingLevel && !savedEffort) {
-        savedProviderEffort.opencode = currentThinkingLevel;
-        changed = true;
-      }
-
-      if (ProviderRegistry.resolveSettingsProviderId(settingsBag) === this.providerId) {
-        const activeModel = typeof settingsBag.model === 'string' ? settingsBag.model : '';
-        const activeEffort = typeof settingsBag.effortLevel === 'string' ? settingsBag.effortLevel : '';
-        if (!activeModel || activeModel === OPENCODE_SYNTHETIC_MODEL_ID) {
-          settingsBag.model = currentModelSelection;
-          changed = true;
-        }
-        if (currentThinkingLevel && !activeEffort) {
-          settingsBag.effortLevel = currentThinkingLevel;
-          changed = true;
-        }
-      }
+    if (currentBaseRawModelId) {
+      const seeded = this.seedActiveModelSelection(
+        settingsBag,
+        encodeOpencodeModelId(currentBaseRawModelId),
+        currentThinkingLevel,
+      );
+      changed = changed || seeded;
     }
 
     if (!changed && !discoveryChanged) {
@@ -867,41 +833,73 @@ export class OpencodeChatRuntime implements ChatRuntime {
     this.refreshModelSelectors();
   }
 
+  private seedActiveModelSelection(
+    settingsBag: Record<string, unknown>,
+    modelSelection: string,
+    thinkingLevel: string | null,
+  ): boolean {
+    let changed = false;
+    const savedProviderModel = ensureProviderProjectionMap(settingsBag, 'savedProviderModel');
+    const savedModel = typeof savedProviderModel.opencode === 'string'
+      ? savedProviderModel.opencode
+      : '';
+    if (!savedModel || savedModel === OPENCODE_SYNTHETIC_MODEL_ID) {
+      savedProviderModel.opencode = modelSelection;
+      changed = true;
+    }
+
+    if (thinkingLevel) {
+      const savedProviderEffort = ensureProviderProjectionMap(settingsBag, 'savedProviderEffort');
+      if (typeof savedProviderEffort.opencode !== 'string' || !savedProviderEffort.opencode) {
+        savedProviderEffort.opencode = thinkingLevel;
+        changed = true;
+      }
+    }
+
+    if (ProviderRegistry.resolveSettingsProviderId(settingsBag) !== this.providerId) {
+      return changed;
+    }
+
+    const activeModel = typeof settingsBag.model === 'string' ? settingsBag.model : '';
+    if (!activeModel || activeModel === OPENCODE_SYNTHETIC_MODEL_ID) {
+      settingsBag.model = modelSelection;
+      changed = true;
+    }
+    if (thinkingLevel) {
+      const activeEffort = typeof settingsBag.effortLevel === 'string' ? settingsBag.effortLevel : '';
+      if (!activeEffort) {
+        settingsBag.effortLevel = thinkingLevel;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   private async syncSessionModeState(params: {
     configOptions?: AcpSessionConfigOption[] | null;
     currentModeId?: string | null;
     modes?: AcpSessionModeState | null;
   }): Promise<void> {
     const acpState = extractAcpSessionModeState(params);
-    const state = {
-      availableModes: normalizeOpencodeAvailableModes(acpState.availableModes),
-      currentModeId: acpState.currentModeId,
-    };
-    const currentModeId = params.currentModeId ?? state.currentModeId;
+    const availableModes = normalizeOpencodeAvailableModes(acpState.availableModes);
+    const currentModeId = params.currentModeId ?? acpState.currentModeId;
     if (currentModeId) {
       this.currentSessionModeId = currentModeId;
     }
 
     const settingsBag = this.plugin.settings as unknown as Record<string, unknown>;
     const currentSettings = getOpencodeProviderSettings(settingsBag);
-    const hasAvailableModes = state.availableModes.length > 0;
-    const shouldUpdateAvailableModes = hasAvailableModes
-      && !sameModes(currentSettings.availableModes, state.availableModes);
     const shouldSeedSelectedMode = Boolean(currentModeId) && !currentSettings.selectedMode;
-    const discoveryChanged = shouldUpdateAvailableModes
-      ? updateOpencodeDiscoveryState(settingsBag, { availableModes: state.availableModes })
-      : false;
+    const discoveryChanged = availableModes.length > 0
+      && !sameModes(currentSettings.availableModes, availableModes)
+      && updateOpencodeDiscoveryState(settingsBag, { availableModes });
+
     if (!discoveryChanged && !shouldSeedSelectedMode) {
       return;
     }
 
     if (shouldSeedSelectedMode && currentModeId) {
-      updateOpencodeProviderSettings(settingsBag, {
-        selectedMode: currentModeId,
-      });
-    }
-
-    if (shouldSeedSelectedMode) {
+      updateOpencodeProviderSettings(settingsBag, { selectedMode: currentModeId });
       await this.plugin.saveSettings();
     }
     this.refreshModelSelectors();
@@ -1442,61 +1440,3 @@ function selectPermissionOption(
   return { outcome: { outcome: 'cancelled' } };
 }
 
-function sameDiscoveredModels(
-  left: OpencodeDiscoveredModel[],
-  right: OpencodeDiscoveredModel[],
-): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((model, index) => (
-    model.rawId === right[index]?.rawId
-    && model.label === right[index]?.label
-    && (model.description ?? '') === (right[index]?.description ?? '')
-  ));
-}
-
-function sameVisibleModels(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((model, index) => model === right[index]);
-}
-
-function sameModes(left: OpencodeMode[], right: OpencodeMode[]): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((mode, index) => (
-    mode.id === right[index]?.id
-    && mode.name === right[index]?.name
-    && (mode.description ?? '') === (right[index]?.description ?? '')
-  ));
-}
-
-function sameStringMap(left: Record<string, string>, right: Record<string, string>): boolean {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-
-  return leftEntries.every(([key, value]) => right[key] === value);
-}
-
-function ensureProviderProjectionMap(
-  settings: Record<string, unknown>,
-  key: 'savedProviderEffort' | 'savedProviderModel',
-): Record<string, string> {
-  const current = settings[key];
-  if (current && typeof current === 'object' && !Array.isArray(current)) {
-    return current as Record<string, string>;
-  }
-
-  const next: Record<string, string> = {};
-  settings[key] = next;
-  return next;
-}

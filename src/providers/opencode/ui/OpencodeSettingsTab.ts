@@ -7,6 +7,7 @@ import { getHostnameKey } from '../../../utils/env';
 import { expandHomePath } from '../../../utils/path';
 import { maybeGetOpencodeWorkspaceServices } from '../app/OpencodeWorkspaceServices';
 import { clearOpencodeDiscoveryState } from '../discoveryState';
+import { sameStringList } from '../internal/compareCollections';
 import {
   buildOpencodeBaseModels,
   type OpencodeDiscoveredModel,
@@ -570,10 +571,3 @@ function buildEnrichedModels(
   });
 }
 
-function sameStringList(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((entry, index) => entry === right[index]);
-}

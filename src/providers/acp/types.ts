@@ -25,16 +25,15 @@ export interface AcpAuthEnvVar {
   secret?: boolean;
 }
 
-interface AcpAuthMethodBase {
+export type AcpAuthMethod = {
+  description?: string | null;
   id: string;
   name?: string | null;
-  description?: string | null;
-}
-
-export type AcpAuthMethod =
-  | (AcpAuthMethodBase & { type?: 'agent' })
-  | (AcpAuthMethodBase & { type: 'env_var'; envVars: AcpAuthEnvVar[] })
-  | (AcpAuthMethodBase & { type: 'terminal'; command: string; args?: string[] });
+} & (
+  | { type?: 'agent' }
+  | { envVars: AcpAuthEnvVar[]; type: 'env_var' }
+  | { args?: string[]; command: string; type: 'terminal' }
+);
 
 export interface AcpFileSystemCapabilities {
   readTextFile?: boolean;
@@ -169,23 +168,19 @@ export type AcpSessionConfigSelectOptions =
   | AcpSessionConfigSelectOption[]
   | AcpSessionConfigSelectGroup[];
 
-export interface AcpSessionConfigOptionBase {
+export type AcpSessionConfigOption = {
   category?: 'mode' | 'model' | 'thought_level' | string | null;
   description?: string | null;
   id: AcpSessionConfigId;
   name: string;
-}
-
-export type AcpSessionConfigOption =
-  | (AcpSessionConfigOptionBase & {
-    type: 'boolean';
-    value: boolean;
-  })
-  | (AcpSessionConfigOptionBase & {
+} & (
+  | { type: 'boolean'; value: boolean }
+  | {
     currentValue: AcpSessionConfigValueId;
     options: AcpSessionConfigSelectOptions;
     type: 'select';
-  });
+  }
+);
 
 export interface AcpNewSessionRequest {
   additionalDirectories?: string[];

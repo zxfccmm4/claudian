@@ -1,4 +1,4 @@
-import { type ChildProcessWithoutNullStreams,spawn } from 'node:child_process';
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 
 const SIGKILL_TIMEOUT_MS = 3_000;
@@ -23,24 +23,22 @@ export class AcpSubprocess {
   constructor(private readonly launchSpec: AcpSubprocessLaunchSpec) {}
 
   get stdin(): Writable {
-    if (!this.proc?.stdin) {
-      throw new Error('ACP subprocess is not started');
-    }
-    return this.proc.stdin;
+    return this.requireProc().stdin;
   }
 
   get stdout(): Readable {
-    if (!this.proc?.stdout) {
-      throw new Error('ACP subprocess is not started');
-    }
-    return this.proc.stdout;
+    return this.requireProc().stdout;
   }
 
   get stderr(): Readable {
-    if (!this.proc?.stderr) {
+    return this.requireProc().stderr;
+  }
+
+  private requireProc(): ChildProcessWithoutNullStreams {
+    if (!this.proc) {
       throw new Error('ACP subprocess is not started');
     }
-    return this.proc.stderr;
+    return this.proc;
   }
 
   start(): void {

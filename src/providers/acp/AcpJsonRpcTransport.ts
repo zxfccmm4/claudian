@@ -48,11 +48,10 @@ type JsonRpcNotificationHandler = (params: unknown) => void | Promise<void>;
 type JsonRpcRequestHandler = (params: unknown) => Promise<unknown>;
 
 interface PendingRequest {
-  abortCleanup?: () => void;
+  cleanup: () => void;
   method: string;
   reject: (error: Error) => void;
   resolve: (result: unknown) => void;
-  timer?: ReturnType<typeof setTimeout>;
 }
 
 export class JsonRpcTransportClosedError extends Error {
@@ -114,13 +113,11 @@ export class AcpJsonRpcTransport {
       }
     });
 
-    if (this.streams.onClose) {
-      this.unregisterClose = this.streams.onClose((error) => {
-        if (!this.disposed) {
-          this.dispose(error ?? new JsonRpcTransportClosedError());
-        }
-      });
-    }
+    this.unregisterClose = this.streams.onClose?.((error) => {
+      if (!this.disposed) {
+        this.dispose(error ?? new JsonRpcTransportClosedError());
+      }
+    });
   }
 
   onClose(listener: (error?: Error) => void): () => void {
@@ -131,9 +128,12 @@ export class AcpJsonRpcTransport {
   }
 
   onNotification(method: string, handler: JsonRpcNotificationHandler): () => void {
-    const handlers = this.notificationHandlers.get(method) ?? new Set<JsonRpcNotificationHandler>();
+    let handlers = this.notificationHandlers.get(method);
+    if (!handlers) {
+      handlers = new Set();
+      this.notificationHandlers.set(method, handlers);
+    }
     handlers.add(handler);
-    this.notificationHandlers.set(method, handlers);
 
     return () => {
       const current = this.notificationHandlers.get(method);
@@ -169,51 +169,52 @@ export class AcpJsonRpcTransport {
     const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
 
     return new Promise<T>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
+
+      const cleanup = (): void => {
+        if (timer) clearTimeout(timer);
+        if (onAbort && options.signal) {
+          options.signal.removeEventListener('abort', onAbort);
+        }
+      };
+
       const pending: PendingRequest = {
+        cleanup,
         method,
         reject,
         resolve: resolve as (result: unknown) => void,
       };
 
       if (timeoutMs > 0) {
-        pending.timer = setTimeout(() => {
+        timer = setTimeout(() => {
           this.pending.delete(id);
-          pending.abortCleanup?.();
+          cleanup();
           reject(new Error(`Request timeout: ${method} (${timeoutMs}ms)`));
         }, timeoutMs);
       }
 
       if (options.signal) {
         if (options.signal.aborted) {
-          if (pending.timer) clearTimeout(pending.timer);
+          cleanup();
           reject(new Error(`Request aborted: ${method}`));
           return;
         }
-
-        const onAbort = () => {
+        onAbort = () => {
           this.pending.delete(id);
-          if (pending.timer) clearTimeout(pending.timer);
+          cleanup();
           reject(new Error(`Request aborted: ${method}`));
         };
         options.signal.addEventListener('abort', onAbort, { once: true });
-        pending.abortCleanup = () => {
-          options.signal?.removeEventListener('abort', onAbort);
-        };
       }
 
       this.pending.set(id, pending);
 
       try {
-        this.sendRaw({
-          id,
-          jsonrpc: '2.0',
-          method,
-          params,
-        });
+        this.sendRaw({ id, jsonrpc: '2.0', method, params });
       } catch (error) {
         this.pending.delete(id);
-        if (pending.timer) clearTimeout(pending.timer);
-        pending.abortCleanup?.();
+        cleanup();
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
@@ -224,12 +225,7 @@ export class AcpJsonRpcTransport {
     if (this.disposed) {
       return;
     }
-
-    this.sendRaw({
-      jsonrpc: '2.0',
-      method,
-      params,
-    });
+    this.sendRaw({ jsonrpc: '2.0', method, params });
   }
 
   dispose(error: Error = new JsonRpcTransportClosedError('JSON-RPC transport disposed')): void {
@@ -240,10 +236,8 @@ export class AcpJsonRpcTransport {
     this.disposed = true;
     this.abortController.abort();
 
-    if (this.unregisterClose) {
-      this.unregisterClose();
-      this.unregisterClose = undefined;
-    }
+    this.unregisterClose?.();
+    this.unregisterClose = undefined;
 
     if (this.readline) {
       this.readline.removeAllListeners();
@@ -252,8 +246,7 @@ export class AcpJsonRpcTransport {
     }
 
     for (const [id, pending] of this.pending) {
-      if (pending.timer) clearTimeout(pending.timer);
-      pending.abortCleanup?.();
+      pending.cleanup();
       pending.reject(error);
       this.pending.delete(id);
     }
@@ -283,12 +276,10 @@ export class AcpJsonRpcTransport {
       this.handleResponse(message);
       return;
     }
-
     if ('method' in message && 'id' in message) {
       this.handleRequest(message);
       return;
     }
-
     if ('method' in message) {
       this.handleNotification(message);
     }
@@ -305,18 +296,15 @@ export class AcpJsonRpcTransport {
     }
 
     this.pending.delete(message.id);
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.abortCleanup?.();
+    pending.cleanup();
 
     if (message.error) {
-      pending.reject(
-        new JsonRpcErrorResponse(
-          pending.method,
-          message.error.code,
-          message.error.message,
-          message.error.data,
-        ),
-      );
+      pending.reject(new JsonRpcErrorResponse(
+        pending.method,
+        message.error.code,
+        message.error.message,
+        message.error.data,
+      ));
       return;
     }
 
@@ -352,11 +340,7 @@ export class AcpJsonRpcTransport {
 
     void Promise.resolve(handler(message.params)).then(
       (result) => {
-        this.sendRaw({
-          id: message.id,
-          jsonrpc: '2.0',
-          result,
-        });
+        this.sendRaw({ id: message.id, jsonrpc: '2.0', result });
       },
       (error) => {
         this.sendRaw({
@@ -375,7 +359,6 @@ export class AcpJsonRpcTransport {
     if (this.disposed) {
       throw new JsonRpcTransportClosedError();
     }
-
     this.streams.output.write(`${JSON.stringify(message)}\n`);
   }
 }

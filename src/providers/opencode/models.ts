@@ -50,21 +50,12 @@ export function encodeOpencodeModelId(rawModelId: string): string {
 }
 
 export function decodeOpencodeModelId(model: string): string | null {
-  if (model.startsWith(OPENCODE_MODEL_PREFIX)) {
-    const rawModelId = model.slice(OPENCODE_MODEL_PREFIX.length).trim();
-    return rawModelId || null;
-  }
-
-  return model === OPENCODE_SYNTHETIC_MODEL_ID ? null : null;
-}
-
-export function normalizeOpencodeModelValue(value: string | null | undefined): string | null {
-  if (!value) {
+  if (!model.startsWith(OPENCODE_MODEL_PREFIX)) {
     return null;
   }
 
-  const normalized = decodeOpencodeModelId(value) ?? value.trim();
-  return normalized || null;
+  const rawModelId = model.slice(OPENCODE_MODEL_PREFIX.length).trim();
+  return rawModelId || null;
 }
 
 export function normalizeOpencodeDiscoveredModels(value: unknown): OpencodeDiscoveredModel[] {
@@ -235,22 +226,16 @@ export function buildOpencodeBaseModels(
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 
-export function getOpencodeBaseModel(
-  rawId: string,
-  models: OpencodeDiscoveredModel[],
-): OpencodeBaseModel | null {
-  const baseRawId = resolveOpencodeBaseModelRawId(rawId, models);
-  return buildOpencodeBaseModels(models).find((model) => model.rawId === baseRawId) ?? null;
-}
-
 export function getOpencodeModelVariants(
   rawId: string,
   models: OpencodeDiscoveredModel[],
 ): OpencodeModelVariant[] {
-  return getOpencodeBaseModel(rawId, models)?.variants ?? [];
+  const baseRawId = resolveOpencodeBaseModelRawId(rawId, models);
+  return buildOpencodeBaseModels(models)
+    .find((model) => model.rawId === baseRawId)?.variants ?? [];
 }
 
-export function formatOpencodeThinkingLevelLabel(value: string): string {
+function formatOpencodeThinkingLevelLabel(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
     return '';

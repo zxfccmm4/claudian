@@ -1,6 +1,8 @@
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import type { Conversation } from '../../../core/types';
 import { clearOpencodeDiscoveryState } from '../discoveryState';
+import { sameStringList, sameStringMap } from '../internal/compareCollections';
+import { ensureProviderProjectionMap } from '../internal/providerProjection';
 import {
   decodeOpencodeModelId,
   encodeOpencodeModelId,
@@ -16,6 +18,11 @@ import {
   normalizeOpencodeVisibleModels,
   updateOpencodeProviderSettings,
 } from '../settings';
+
+interface NormalizedSelection {
+  baseModelId: string | null;
+  variant: string | null;
+}
 
 export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
   handleEnvironmentChange(settings: Record<string, unknown>): boolean {
@@ -38,7 +45,7 @@ export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
     const opencodeSettings = getOpencodeProviderSettings(settings);
     let changed = hadLegacyDiscoveryFields;
 
-    const normalizeSelection = (value: unknown): { baseModelId: string | null; variant: string | null } => {
+    const normalizeSelection = (value: unknown): NormalizedSelection => {
       if (typeof value !== 'string' || !isOpencodeModelSelectionId(value)) {
         return { baseModelId: null, variant: null };
       }
@@ -78,37 +85,24 @@ export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
       changed = true;
     }
 
-    const savedProviderModel = settings.savedProviderModel;
-    if (savedProviderModel && typeof savedProviderModel === 'object' && !Array.isArray(savedProviderModel)) {
-      const currentSavedModel = (savedProviderModel as Record<string, unknown>).opencode;
-      const savedSelection = normalizeSelection(currentSavedModel);
+    const savedProviderModelRaw = settings.savedProviderModel;
+    if (savedProviderModelRaw && typeof savedProviderModelRaw === 'object' && !Array.isArray(savedProviderModelRaw)) {
+      const savedProviderModel = savedProviderModelRaw as Record<string, unknown>;
+      const savedSelection = normalizeSelection(savedProviderModel.opencode);
       if (
-        typeof currentSavedModel === 'string'
+        typeof savedProviderModel.opencode === 'string'
         && savedSelection.baseModelId
-        && currentSavedModel !== savedSelection.baseModelId
+        && savedProviderModel.opencode !== savedSelection.baseModelId
       ) {
-        (savedProviderModel as Record<string, unknown>).opencode = savedSelection.baseModelId;
+        savedProviderModel.opencode = savedSelection.baseModelId;
         changed = true;
       }
-      if (
-        savedSelection.variant
-        && (
-          !settings.savedProviderEffort
-          || typeof settings.savedProviderEffort !== 'object'
-          || Array.isArray(settings.savedProviderEffort)
-        )
-      ) {
-        settings.savedProviderEffort = {};
-      }
-      if (
-        savedSelection.variant
-        && settings.savedProviderEffort
-        && typeof settings.savedProviderEffort === 'object'
-        && !Array.isArray(settings.savedProviderEffort)
-        && typeof (settings.savedProviderEffort as Record<string, unknown>).opencode !== 'string'
-      ) {
-        (settings.savedProviderEffort as Record<string, unknown>).opencode = savedSelection.variant;
-        changed = true;
+      if (savedSelection.variant) {
+        const savedEffort = ensureProviderProjectionMap(settings, 'savedProviderEffort');
+        if (typeof savedEffort.opencode !== 'string') {
+          savedEffort.opencode = savedSelection.variant;
+          changed = true;
+        }
       }
     }
 
@@ -120,8 +114,7 @@ export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
       opencodeSettings.preferredThinkingByModel,
       opencodeSettings.discoveredModels,
     );
-    const shouldUpdateProviderSettings = normalizedVisibleModels.length !== opencodeSettings.visibleModels.length
-      || normalizedVisibleModels.some((entry, index) => entry !== opencodeSettings.visibleModels[index])
+    const shouldUpdateProviderSettings = !sameStringList(normalizedVisibleModels, opencodeSettings.visibleModels)
       || !sameStringMap(normalizedPreferredThinking, opencodeSettings.preferredThinkingByModel);
     if (shouldUpdateProviderSettings) {
       updateOpencodeProviderSettings(settings, {
@@ -139,13 +132,3 @@ export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
     return changed;
   },
 };
-
-function sameStringMap(left: Record<string, string>, right: Record<string, string>): boolean {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-
-  return leftEntries.every(([key, value]) => right[key] === value);
-}

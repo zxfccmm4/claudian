@@ -19,18 +19,17 @@ export interface AcpResolvedSessionModeState {
   currentModeId: string | null;
 }
 
+type SelectItem = { description?: string; id: string; name: string };
+
 export function flattenAcpSessionConfigSelectOptions(
   options: AcpSessionConfigSelectOptions,
 ): AcpSessionConfigSelectOption[] {
   if (options.length === 0) {
     return [];
   }
-
-  const first = options[0];
-  if (isSelectGroup(first)) {
+  if (isSelectGroup(options[0])) {
     return (options as AcpSessionConfigSelectGroup[]).flatMap((group) => group.options);
   }
-
   return options as AcpSessionConfigSelectOption[];
 }
 
@@ -38,24 +37,13 @@ export function extractAcpSessionModelState(params: {
   configOptions?: AcpSessionConfigOption[] | null;
   models?: AcpSessionModelState | null;
 }): AcpResolvedSessionModelState {
-  const modelOption = findSessionConfigSelectOption(params.configOptions, 'model');
-  const configModels = modelOption
-    ? flattenAcpSessionConfigSelectOptions(modelOption.options).map((option) => ({
-      ...(option.description ? { description: option.description } : {}),
-      id: option.value,
-      name: option.name,
-    }))
-    : [];
-  if (modelOption && configModels.length > 0) {
-    return {
-      availableModels: configModels,
-      currentModelId: modelOption.currentValue,
-    };
+  const { items, current } = resolveSelectItems(params.configOptions, 'model');
+  if (items) {
+    return { availableModels: items, currentModelId: current };
   }
-
   return {
     availableModels: params.models?.availableModels ?? [],
-    currentModelId: params.models?.currentModelId ?? modelOption?.currentValue ?? null,
+    currentModelId: params.models?.currentModelId ?? current,
   };
 }
 
@@ -63,24 +51,37 @@ export function extractAcpSessionModeState(params: {
   configOptions?: AcpSessionConfigOption[] | null;
   modes?: AcpSessionModeState | null;
 }): AcpResolvedSessionModeState {
-  const modeOption = findSessionConfigSelectOption(params.configOptions, 'mode');
-  const configModes = modeOption
-    ? flattenAcpSessionConfigSelectOptions(modeOption.options).map((option) => ({
-      ...(option.description ? { description: option.description } : {}),
-      id: option.value,
-      name: option.name,
-    }))
-    : [];
-  if (modeOption && configModes.length > 0) {
-    return {
-      availableModes: configModes,
-      currentModeId: modeOption.currentValue,
-    };
+  const { items, current } = resolveSelectItems(params.configOptions, 'mode');
+  if (items) {
+    return { availableModes: items, currentModeId: current };
   }
-
   return {
     availableModes: params.modes?.availableModes ?? [],
-    currentModeId: params.modes?.currentModeId ?? modeOption?.currentValue ?? null,
+    currentModeId: params.modes?.currentModeId ?? current,
+  };
+}
+
+// `items` is null when the config option is missing or empty so callers fall back to
+// the session's own metadata. `current` is always the config option's `currentValue`
+// when one exists, so fallbacks can still seed a current id from it.
+function resolveSelectItems(
+  configOptions: AcpSessionConfigOption[] | null | undefined,
+  category: 'model' | 'mode',
+): { current: string | null; items: SelectItem[] | null } {
+  const selectOption = findSessionConfigSelectOption(configOptions, category);
+  if (!selectOption) {
+    return { current: null, items: null };
+  }
+
+  const items = flattenAcpSessionConfigSelectOptions(selectOption.options).map((option) => ({
+    ...(option.description ? { description: option.description } : {}),
+    id: option.value,
+    name: option.name,
+  }));
+
+  return {
+    current: selectOption.currentValue,
+    items: items.length > 0 ? items : null,
   };
 }
 
@@ -88,19 +89,21 @@ function findSessionConfigSelectOption(
   configOptions: AcpSessionConfigOption[] | null | undefined,
   category: 'model' | 'mode',
 ): Extract<AcpSessionConfigOption, { type: 'select' }> | null {
-  const categoryMatch = configOptions?.find((option) => (
-    option.type === 'select'
-    && normalizeComparableKey(option.category) === category
-  ));
-  if (categoryMatch?.type === 'select') {
-    return categoryMatch;
+  if (!configOptions) {
+    return null;
   }
-
-  const legacyIdMatch = configOptions?.find((option) => (
-    option.type === 'select'
-    && normalizeComparableKey(option.id) === category
+  // Prefer explicit `category` metadata; fall back to id-based matching for older agents
+  // that have not yet migrated their config options to tag a category.
+  const byCategory = configOptions.find((option) => (
+    option.type === 'select' && normalizeComparableKey(option.category) === category
   ));
-  return legacyIdMatch?.type === 'select' ? legacyIdMatch : null;
+  if (byCategory?.type === 'select') {
+    return byCategory;
+  }
+  const byLegacyId = configOptions.find((option) => (
+    option.type === 'select' && normalizeComparableKey(option.id) === category
+  ));
+  return byLegacyId?.type === 'select' ? byLegacyId : null;
 }
 
 function isSelectGroup(

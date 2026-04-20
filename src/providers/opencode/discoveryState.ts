@@ -1,3 +1,4 @@
+import { sameDiscoveredModels, sameModes } from './internal/compareCollections';
 import {
   normalizeOpencodeDiscoveredModels,
   type OpencodeDiscoveredModel,
@@ -19,8 +20,8 @@ type SettingsBag = Record<string | symbol, unknown>;
 function ensureDiscoveryState(settings: Record<string, unknown>): OpencodeDiscoveryState {
   const bag = settings as SettingsBag;
   const existing = bag[OPENCODE_DISCOVERY_STATE];
-  if (isDiscoveryState(existing)) {
-    return existing;
+  if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+    return existing as OpencodeDiscoveryState;
   }
 
   const next: OpencodeDiscoveryState = {
@@ -31,43 +32,12 @@ function ensureDiscoveryState(settings: Record<string, unknown>): OpencodeDiscov
   return next;
 }
 
-function isDiscoveryState(value: unknown): value is OpencodeDiscoveryState {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
 function cloneModes(modes: OpencodeMode[]): OpencodeMode[] {
   return modes.map((mode) => ({ ...mode }));
 }
 
 function cloneDiscoveredModels(models: OpencodeDiscoveredModel[]): OpencodeDiscoveredModel[] {
   return models.map((model) => ({ ...model }));
-}
-
-function sameModes(left: OpencodeMode[], right: OpencodeMode[]): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((mode, index) => (
-    mode.id === right[index]?.id
-    && mode.name === right[index]?.name
-    && (mode.description ?? '') === (right[index]?.description ?? '')
-  ));
-}
-
-function sameDiscoveredModels(
-  left: OpencodeDiscoveredModel[],
-  right: OpencodeDiscoveredModel[],
-): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((model, index) => (
-    model.rawId === right[index]?.rawId
-    && model.label === right[index]?.label
-    && (model.description ?? '') === (right[index]?.description ?? '')
-  ));
 }
 
 export function getOpencodeDiscoveryState(settings: Record<string, unknown>): OpencodeDiscoveryState {

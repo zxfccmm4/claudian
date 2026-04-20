@@ -7,6 +7,7 @@ import {
   seedOpencodeDiscoveryStateFromLegacyConfig,
   updateOpencodeDiscoveryState,
 } from './discoveryState';
+import { ensureProviderProjectionMap } from './internal/providerProjection';
 import {
   decodeOpencodeModelId,
   encodeOpencodeModelId,
@@ -311,11 +312,11 @@ function retargetRemovedOpencodeSelections(
     return visibleSet.has(baseRawId) ? null : fallbackModelId;
   };
 
-  const savedProviderModel = ensureProjectionMap(settings, 'savedProviderModel');
+  const savedProviderModel = ensureProviderProjectionMap(settings, 'savedProviderModel');
   const nextSavedModel = maybeRetargetModel(savedProviderModel.opencode);
   if (nextSavedModel) {
     savedProviderModel.opencode = nextSavedModel;
-    ensureProjectionMap(settings, 'savedProviderEffort').opencode = fallbackEffort;
+    ensureProviderProjectionMap(settings, 'savedProviderEffort').opencode = fallbackEffort;
   }
 
   const nextTopLevelModel = maybeRetargetModel(settings.model);
@@ -323,18 +324,4 @@ function retargetRemovedOpencodeSelections(
     settings.model = nextTopLevelModel;
     settings.effortLevel = fallbackEffort;
   }
-}
-
-function ensureProjectionMap(
-  settings: Record<string, unknown>,
-  key: 'savedProviderEffort' | 'savedProviderModel',
-): Record<string, string> {
-  const current = settings[key];
-  if (current && typeof current === 'object' && !Array.isArray(current)) {
-    return current as Record<string, string>;
-  }
-
-  const next: Record<string, string> = {};
-  settings[key] = next;
-  return next;
 }

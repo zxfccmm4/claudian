@@ -1,6 +1,12 @@
 import type { AcpJsonRpcTransport } from './AcpJsonRpcTransport';
 import { JsonRpcErrorResponse } from './AcpJsonRpcTransport';
-import { ACP_SERVER_NOTIFICATION_ALIASES, ACP_SERVER_REQUEST_ALIASES, type AcpLogicalMethod, type AcpMethodOverrides,getAcpMethodCandidates } from './methodNames';
+import {
+  ACP_SERVER_NOTIFICATION_ALIASES,
+  ACP_SERVER_REQUEST_ALIASES,
+  type AcpLogicalMethod,
+  type AcpMethodOverrides,
+  getAcpMethodCandidates,
+} from './methodNames';
 import type {
   AcpAuthenticateRequest,
   AcpAuthenticateResponse,
@@ -113,8 +119,7 @@ export class AcpClientConnection {
 
   dispose(): void {
     while (this.unsubscribeHandlers.length > 0) {
-      const unsubscribe = this.unsubscribeHandlers.pop();
-      unsubscribe?.();
+      this.unsubscribeHandlers.pop()?.();
     }
     this.sessionNotificationListeners.clear();
   }
@@ -123,7 +128,7 @@ export class AcpClientConnection {
     partialRequest: Partial<AcpInitializeRequest> = {},
   ): Promise<AcpInitializeResponse> {
     const request: AcpInitializeRequest = {
-      clientCapabilities: this.mergeCapabilities(
+      clientCapabilities: mergeCapabilities(
         this.buildClientCapabilities(),
         partialRequest.clientCapabilities,
       ),
@@ -173,150 +178,91 @@ export class AcpClientConnection {
   }
 
   private buildClientCapabilities(): AcpClientCapabilities | undefined {
-    const capabilities: AcpClientCapabilities = {
-      ...this.options.clientCapabilities,
-    };
-    const delegate = this.options.delegate;
+    const capabilities: AcpClientCapabilities = { ...this.options.clientCapabilities };
+    const fileSystem = this.options.delegate?.fileSystem;
+    const terminal = this.options.delegate?.terminal;
 
-    if (delegate?.fileSystem?.readTextFile || delegate?.fileSystem?.writeTextFile) {
+    if (fileSystem?.readTextFile || fileSystem?.writeTextFile) {
       capabilities.fs = {
         ...capabilities.fs,
-        ...(delegate.fileSystem.readTextFile ? { readTextFile: true } : {}),
-        ...(delegate.fileSystem.writeTextFile ? { writeTextFile: true } : {}),
+        ...(fileSystem.readTextFile ? { readTextFile: true } : {}),
+        ...(fileSystem.writeTextFile ? { writeTextFile: true } : {}),
       };
     }
 
-    if (delegate?.terminal && this.hasTerminalSupport(delegate.terminal)) {
+    if (terminal) {
       capabilities.terminal = true;
     }
 
-    if (this.isEmptyObject(capabilities)) {
-      return undefined;
-    }
-
-    return capabilities;
-  }
-
-  private mergeCapabilities(
-    base: AcpClientCapabilities | undefined,
-    override: AcpClientCapabilities | undefined,
-  ): AcpClientCapabilities | undefined {
-    if (!base && !override) {
-      return undefined;
-    }
-
-    const merged: AcpClientCapabilities = {
-      ...(base ?? {}),
-      ...(override ?? {}),
-    };
-
-    if (base?.auth || override?.auth) {
-      merged.auth = {
-        ...(base?.auth ?? {}),
-        ...(override?.auth ?? {}),
-      };
-    }
-
-    if (base?.fs || override?.fs) {
-      merged.fs = {
-        ...(base?.fs ?? {}),
-        ...(override?.fs ?? {}),
-      };
-    }
-
-    return this.isEmptyObject(merged) ? undefined : merged;
-  }
-
-  private hasTerminalSupport(delegate: AcpTerminalDelegate | undefined): delegate is AcpTerminalDelegate {
-    return delegate !== undefined;
-  }
-
-  private isEmptyObject(value: object): boolean {
-    return Object.keys(value).length === 0;
+    return Object.keys(capabilities).length === 0 ? undefined : capabilities;
   }
 
   private registerServerHandlers(): void {
-    this.registerNotificationAliases(
+    const transport = this.options.transport;
+    const delegate = this.options.delegate;
+
+    const subscribeNotification = (aliases: readonly string[], handler: (params: unknown) => Promise<void>): void => {
+      for (const alias of aliases) {
+        this.unsubscribeHandlers.push(transport.onNotification(alias, handler));
+      }
+    };
+    const subscribeRequest = (aliases: readonly string[], handler: (params: unknown) => Promise<unknown>): void => {
+      for (const alias of aliases) {
+        this.unsubscribeHandlers.push(transport.onRequest(alias, handler));
+      }
+    };
+
+    subscribeNotification(
       ACP_SERVER_NOTIFICATION_ALIASES.sessionUpdate,
       async (params) => this.dispatchSessionNotification(params as AcpSessionNotification),
     );
 
-    if (this.options.delegate?.requestPermission) {
-      this.registerRequestAliases(
+    if (delegate?.requestPermission) {
+      const requestPermission = delegate.requestPermission;
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.requestPermission,
-        (params) => this.options.delegate!.requestPermission!(
-          params as AcpRequestPermissionRequest,
-        ),
+        (params) => requestPermission(params as AcpRequestPermissionRequest),
       );
     }
 
-    if (this.options.delegate?.fileSystem?.readTextFile) {
-      this.registerRequestAliases(
+    const fileSystem = delegate?.fileSystem;
+    if (fileSystem?.readTextFile) {
+      const readTextFile = fileSystem.readTextFile;
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.readTextFile,
-        (params) => this.options.delegate!.fileSystem!.readTextFile!(
-          params as AcpReadTextFileRequest,
-        ),
+        (params) => readTextFile(params as AcpReadTextFileRequest),
       );
     }
-
-    if (this.options.delegate?.fileSystem?.writeTextFile) {
-      this.registerRequestAliases(
+    if (fileSystem?.writeTextFile) {
+      const writeTextFile = fileSystem.writeTextFile;
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.writeTextFile,
-        (params) => this.options.delegate!.fileSystem!.writeTextFile!(
-          params as AcpWriteTextFileRequest,
-        ),
+        (params) => writeTextFile(params as AcpWriteTextFileRequest),
       );
     }
 
-    if (this.options.delegate?.terminal && this.hasTerminalSupport(this.options.delegate.terminal)) {
-      this.registerRequestAliases(
+    const terminal = delegate?.terminal;
+    if (terminal) {
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.createTerminal,
-        (params) => this.options.delegate!.terminal!.createTerminal(
-          params as AcpCreateTerminalRequest,
-        ),
+        (params) => terminal.createTerminal(params as AcpCreateTerminalRequest),
       );
-      this.registerRequestAliases(
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.terminalOutput,
-        (params) => this.options.delegate!.terminal!.terminalOutput(
-          params as AcpTerminalOutputRequest,
-        ),
+        (params) => terminal.terminalOutput(params as AcpTerminalOutputRequest),
       );
-      this.registerRequestAliases(
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.waitForTerminalExit,
-        (params) => this.options.delegate!.terminal!.waitForTerminalExit(
-          params as AcpWaitForTerminalExitRequest,
-        ),
+        (params) => terminal.waitForTerminalExit(params as AcpWaitForTerminalExitRequest),
       );
-      this.registerRequestAliases(
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.killTerminal,
-        (params) => this.options.delegate!.terminal!.killTerminal(
-          params as AcpKillTerminalRequest,
-        ),
+        (params) => terminal.killTerminal(params as AcpKillTerminalRequest),
       );
-      this.registerRequestAliases(
+      subscribeRequest(
         ACP_SERVER_REQUEST_ALIASES.releaseTerminal,
-        (params) => this.options.delegate!.terminal!.releaseTerminal(
-          params as AcpReleaseTerminalRequest,
-        ),
+        (params) => terminal.releaseTerminal(params as AcpReleaseTerminalRequest),
       );
-    }
-  }
-
-  private registerNotificationAliases(
-    aliases: readonly string[],
-    handler: (params: unknown) => Promise<void>,
-  ): void {
-    for (const alias of aliases) {
-      this.unsubscribeHandlers.push(this.options.transport.onNotification(alias, handler));
-    }
-  }
-
-  private registerRequestAliases(
-    aliases: readonly string[],
-    handler: (params: unknown) => Promise<unknown>,
-  ): void {
-    for (const alias of aliases) {
-      this.unsubscribeHandlers.push(this.options.transport.onRequest(alias, handler));
     }
   }
 
@@ -330,6 +276,8 @@ export class AcpClientConnection {
     }
   }
 
+  // -32601 (Method not found) is the only error we absorb; agents that advertise legacy
+  // method names only reject unknown candidates with it, so every other code is real.
   private async requestWithFallback<T>(
     logicalMethod: AcpLogicalMethod,
     params?: unknown,
@@ -373,6 +321,8 @@ export class AcpClientConnection {
       return;
     }
 
+    // Notifications get no response, so we cannot probe. Fan out to every candidate
+    // when the caller explicitly opts in (e.g. cancel, which must reach the agent).
     const candidates = getAcpMethodCandidates(logicalMethod, this.options.methodOverrides);
     const methodNames = options.sendAllCandidatesIfUncached
       ? Array.from(new Set(candidates))
@@ -382,4 +332,24 @@ export class AcpClientConnection {
       this.options.transport.notify(methodName, params);
     }
   }
+}
+
+function mergeCapabilities(
+  base: AcpClientCapabilities | undefined,
+  override: AcpClientCapabilities | undefined,
+): AcpClientCapabilities | undefined {
+  if (!base && !override) {
+    return undefined;
+  }
+
+  const merged: AcpClientCapabilities = { ...base, ...override };
+
+  if (base?.auth || override?.auth) {
+    merged.auth = { ...base?.auth, ...override?.auth };
+  }
+  if (base?.fs || override?.fs) {
+    merged.fs = { ...base?.fs, ...override?.fs };
+  }
+
+  return Object.keys(merged).length === 0 ? undefined : merged;
 }

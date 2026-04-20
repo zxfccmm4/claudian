@@ -75,16 +75,12 @@ export class ProviderSettingsCoordinator {
     providerIds: ProviderId[],
   ): boolean {
     let anyChanged = false;
-
     for (const providerId of providerIds) {
-      const changed = ProviderRegistry
-        .getSettingsReconciler(providerId)
-        .handleEnvironmentChange?.(settings) ?? false;
-      if (changed) {
+      const reconciler = ProviderRegistry.getSettingsReconciler(providerId);
+      if (reconciler.handleEnvironmentChange?.(settings)) {
         anyChanged = true;
       }
     }
-
     return anyChanged;
   }
 
@@ -215,45 +211,39 @@ export class ProviderSettingsCoordinator {
       ...(model ? { model } : {}),
     }) ?? null;
 
+    const isAdaptive = Boolean(model) && uiConfig.isAdaptiveReasoningModel(model, settings);
+
     if (savedEffort?.[providerId] !== undefined) {
       settings.effortLevel = savedEffort[providerId];
     } else if (canReuseCurrentProjection && currentEffort !== undefined) {
       settings.effortLevel = currentEffort;
-    } else if (model && uiConfig.isAdaptiveReasoningModel(model, settings)) {
+    } else if (isAdaptive) {
       settings.effortLevel = uiConfig.getDefaultReasoningValue(model, settings);
     }
 
-    if (model && uiConfig.isAdaptiveReasoningModel(model, settings)) {
+    if (isAdaptive) {
       settings.effortLevel = normalizeReasoningValue(uiConfig, settings, model, settings.effortLevel);
     }
 
-    if (serviceTierToggle) {
-      if (savedServiceTier?.[providerId] !== undefined) {
-        settings.serviceTier = savedServiceTier[providerId];
-      } else if (canReuseCurrentProjection && currentServiceTier !== undefined) {
-        settings.serviceTier = currentServiceTier;
-      } else {
-        settings.serviceTier = serviceTierToggle.inactiveValue;
-      }
+    if (savedServiceTier?.[providerId] !== undefined) {
+      settings.serviceTier = savedServiceTier[providerId];
+    } else if (canReuseCurrentProjection && currentServiceTier !== undefined) {
+      settings.serviceTier = currentServiceTier;
     } else {
-      if (savedServiceTier?.[providerId] !== undefined) {
-        settings.serviceTier = savedServiceTier[providerId];
-      } else if (canReuseCurrentProjection && currentServiceTier !== undefined) {
-        settings.serviceTier = currentServiceTier;
-      } else {
-        settings.serviceTier = 'default';
-      }
+      settings.serviceTier = serviceTierToggle?.inactiveValue ?? 'default';
     }
+
+    const usesBudget = Boolean(model) && !isAdaptive;
 
     if (savedBudget?.[providerId] !== undefined) {
       settings.thinkingBudget = savedBudget[providerId];
     } else if (canReuseCurrentProjection && currentBudget !== undefined) {
       settings.thinkingBudget = currentBudget;
-    } else if (model && !uiConfig.isAdaptiveReasoningModel(model, settings)) {
+    } else if (usesBudget) {
       settings.thinkingBudget = uiConfig.getDefaultReasoningValue(model, settings);
     }
 
-    if (model && !uiConfig.isAdaptiveReasoningModel(model, settings)) {
+    if (usesBudget) {
       settings.thinkingBudget = normalizeReasoningValue(uiConfig, settings, model, settings.thinkingBudget);
     }
   }
