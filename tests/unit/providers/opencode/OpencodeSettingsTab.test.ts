@@ -6,7 +6,7 @@ import { opencodeSettingsTabRenderer } from '@/providers/opencode/ui/OpencodeSet
 const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockRenderEnvironmentSettingsSection = jest.fn();
 const mockSaveSettings = jest.fn().mockResolvedValue(undefined);
-const mockBroadcastToAllTabs = jest.fn().mockResolvedValue(undefined);
+const mockBroadcastToProviderTabs = jest.fn().mockResolvedValue(undefined);
 const mockCliResolverReset = jest.fn();
 
 jest.mock('fs');
@@ -270,8 +270,10 @@ function createPlugin(overrides: Record<string, unknown> = {}): any {
     saveSettings: mockSaveSettings,
     getView: jest.fn(() => ({
       getTabManager: jest.fn(() => ({
-        broadcastToAllTabs: mockBroadcastToAllTabs,
+        broadcastToProviderTabs: mockBroadcastToProviderTabs,
       })),
+      invalidateProviderCommandCaches: jest.fn(),
+      refreshModelSelector: jest.fn(),
     })),
   };
 }
@@ -319,7 +321,11 @@ describe('OpencodeSettingsTab', () => {
     });
     expect(mockSaveSettings).toHaveBeenCalledTimes(1);
     expect(mockCliResolverReset).toHaveBeenCalledTimes(1);
-    expect(mockBroadcastToAllTabs).toHaveBeenCalledTimes(1);
+    expect(mockBroadcastToProviderTabs).toHaveBeenCalledTimes(1);
+    expect(mockBroadcastToProviderTabs).toHaveBeenCalledWith(
+      'opencode',
+      expect.any(Function),
+    );
   });
 
   it('renders a notice explaining where vault-level commands and skills are managed', () => {

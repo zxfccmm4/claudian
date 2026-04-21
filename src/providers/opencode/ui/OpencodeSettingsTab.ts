@@ -123,9 +123,14 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
       await context.plugin.saveSettings();
       opencodeWorkspace?.cliResolver?.reset();
       const view = context.plugin.getView();
-      await view?.getTabManager()?.broadcastToAllTabs(
-        (service) => Promise.resolve(service.cleanup()),
-      );
+      const tabManager = view?.getTabManager();
+      if (tabManager?.broadcastToProviderTabs) {
+        await tabManager.broadcastToProviderTabs('opencode', (service) => Promise.resolve(service.cleanup()));
+      } else {
+        await tabManager?.broadcastToAllTabs(
+          (service) => Promise.resolve(service.cleanup()),
+        );
+      }
       view?.invalidateProviderCommandCaches?.(['opencode']);
       view?.refreshModelSelector?.();
       return true;
@@ -570,4 +575,3 @@ function buildEnrichedModels(
     return left.modelLabel.localeCompare(right.modelLabel);
   });
 }
-

@@ -25,6 +25,7 @@ export interface PersistedOpencodeProviderSettings {
   cliPath: string;
   cliPathsByHost: HostnameCliPaths;
   enabled: boolean;
+  environmentHash: string;
   environmentVariables: string;
   modelAliases: Record<string, string>;
   preferredThinkingByModel: Record<string, string>;
@@ -43,6 +44,7 @@ export const DEFAULT_OPENCODE_PROVIDER_SETTINGS: Readonly<PersistedOpencodeProvi
   cliPath: '',
   cliPathsByHost: {},
   enabled: false,
+  environmentHash: '',
   environmentVariables: OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
   modelAliases: {},
   preferredThinkingByModel: {},
@@ -160,6 +162,8 @@ export function getOpencodeProviderSettings(
     discoveredModels,
     enabled: (config.enabled as boolean | undefined)
       ?? DEFAULT_OPENCODE_PROVIDER_SETTINGS.enabled,
+    environmentHash: (config.environmentHash as string | undefined)
+      ?? DEFAULT_OPENCODE_PROVIDER_SETTINGS.environmentHash,
     environmentVariables: (config.environmentVariables as string | undefined)
       ?? getProviderEnvironmentVariables(settings, 'opencode')
       ?? DEFAULT_OPENCODE_PROVIDER_SETTINGS.environmentVariables,
@@ -206,13 +210,9 @@ export function updateOpencodeProviderSettings(
   const nextCliPathsByHost = 'cliPathsByHost' in updates
     ? normalizeHostnameCliPaths(updates.cliPathsByHost)
     : { ...current.cliPathsByHost };
-
-  if (
-    Object.keys(nextCliPathsByHost).length === 0
-    && current.cliPath.trim()
-  ) {
-    nextCliPathsByHost[hostnameKey] = current.cliPath.trim();
-  }
+  let nextCliPath = 'cliPathsByHost' in updates
+    ? DEFAULT_OPENCODE_PROVIDER_SETTINGS.cliPath
+    : current.cliPath.trim();
 
   if ('cliPath' in updates) {
     const trimmedCliPath = typeof updates.cliPath === 'string' ? updates.cliPath.trim() : '';
@@ -221,12 +221,14 @@ export function updateOpencodeProviderSettings(
     } else {
       delete nextCliPathsByHost[hostnameKey];
     }
+    nextCliPath = DEFAULT_OPENCODE_PROVIDER_SETTINGS.cliPath;
   }
 
   const next: OpencodeProviderSettings = {
     ...current,
     ...updates,
     availableModes: nextAvailableModes,
+    cliPath: nextCliPath,
     cliPathsByHost: nextCliPathsByHost,
     discoveredModels: nextDiscoveredModels,
     modelAliases: nextModelAliases,
@@ -246,6 +248,7 @@ export function updateOpencodeProviderSettings(
     cliPath: next.cliPath,
     cliPathsByHost: next.cliPathsByHost,
     enabled: next.enabled,
+    environmentHash: next.environmentHash,
     environmentVariables: next.environmentVariables,
     modelAliases: next.modelAliases,
     preferredThinkingByModel: next.preferredThinkingByModel,

@@ -250,4 +250,34 @@ describe('OpenCode settings normalization', () => {
       'host-a': '/custom/opencode',
     });
   });
+
+  it('drops the legacy cliPath once host-scoped paths are explicitly edited', () => {
+    const settings: Record<string, unknown> = {
+      providerConfigs: {
+        opencode: {
+          cliPath: '/legacy/opencode',
+        },
+      },
+    };
+
+    const next = updateOpencodeProviderSettings(settings, {
+      cliPathsByHost: {
+        'host-a': '/custom/opencode',
+      },
+    });
+
+    expect(next.cliPath).toBe('');
+    expect((settings.providerConfigs as Record<string, any>).opencode.cliPath).toBe('');
+
+    const cleared = updateOpencodeProviderSettings(settings, {
+      cliPathsByHost: {},
+    });
+
+    expect(cleared.cliPath).toBe('');
+    expect(cleared.cliPathsByHost).toEqual({});
+    expect((settings.providerConfigs as Record<string, any>).opencode).toMatchObject({
+      cliPath: '',
+      cliPathsByHost: {},
+    });
+  });
 });

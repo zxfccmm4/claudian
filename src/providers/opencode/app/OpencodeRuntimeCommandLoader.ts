@@ -28,8 +28,14 @@ export class OpencodeRuntimeCommandLoader implements ProviderRuntimeCommandLoade
       return [];
     }
 
-    const runtime = context.runtime?.providerId === 'opencode'
-      ? context.runtime
+    // Rebinding an already-live tab runtime to a history-backed conversation with
+    // no session id must stay cold until the first send. If command discovery
+    // creates a real session on that bound runtime, the first turn can skip
+    // history bootstrap. Keep this warmup isolated instead.
+    const canReuseRuntime = context.runtime?.providerId === 'opencode'
+      && !shouldWarmPreSessionConversation;
+    const runtime = canReuseRuntime
+      ? context.runtime!
       : new OpencodeChatRuntime(context.plugin);
 
     try {

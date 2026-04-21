@@ -92,6 +92,7 @@ export class TabManager implements TabManagerInterface {
   private callbacks: TabManagerCallbacks;
   private providerCommandWarmups = new Map<TabId, ProviderCommandWarmupEntry>();
   private providerCommandCache = new Map<TabId, ProviderCommandCacheEntry>();
+  private isRestoringState = false;
 
   /** Guard to prevent concurrent tab switches. */
   private isSwitchingTab = false;
@@ -219,9 +220,9 @@ export class TabManager implements TabManagerInterface {
     this.tabs.set(tab.id, tab);
     this.callbacks.onTabCreated?.(tab);
 
-    if (activate || !this.activeTabId) {
+    if (!this.isRestoringState && (activate || !this.activeTabId)) {
       await this.switchToTab(tab.id);
-    } else {
+    } else if (!this.isRestoringState) {
       this.maybePrimeProviderRuntime(tab);
     }
 
@@ -633,22 +634,35 @@ export class TabManager implements TabManagerInterface {
 
   /** Restores state from persisted data. */
   async restoreState(state: PersistedTabManagerState): Promise<void> {
-    // Create tabs from persisted state with error handling
-    for (const tabState of state.openTabs) {
-      try {
-        await this.createTab(tabState.conversationId, tabState.tabId, {
-          activate: false,
-          ...(typeof tabState.draftModel === 'string' ? { draftModel: tabState.draftModel } : {}),
-        });
-      } catch {
-        // Continue restoring other tabs
+    this.isRestoringState = true;
+    try {
+      // Create tabs from persisted state with error handling.
+      for (const tabState of state.openTabs) {
+        try {
+          await this.createTab(tabState.conversationId, tabState.tabId, {
+            activate: false,
+            ...(typeof tabState.draftModel === 'string' ? { draftModel: tabState.draftModel } : {}),
+          });
+        } catch {
+          // Continue restoring other tabs
+        }
       }
+    } finally {
+      this.isRestoringState = false;
     }
 
-    // Switch to the previously active tab
-    if (state.activeTabId && this.tabs.has(state.activeTabId)) {
+    const fallbackTabId = state.openTabs.find((tabState) => this.tabs.has(tabState.tabId))?.tabId
+      ?? Array.from(this.tabs.keys())[0]
+      ?? null;
+    const targetTabId = state.activeTabId && this.tabs.has(state.activeTabId)
+      ? state.activeTabId
+      : fallbackTabId;
+
+    // Switch to the previously active tab after all tabs are restored so background
+    // restore does not warm the first restored tab by accident.
+    if (targetTabId) {
       try {
-        await this.switchToTab(state.activeTabId);
+        await this.switchToTab(targetTabId);
       } catch {
         // Ignore switch errors
       }
@@ -946,9 +960,26 @@ export class TabManager implements TabManagerInterface {
    * @param fn Function to call on each runtime.
    */
   async broadcastToAllTabs(fn: (service: ChatRuntime) => Promise<void>): Promise<void> {
+    await this.broadcastToTabs(this.tabs.values(), fn);
+  }
+
+  async broadcastToProviderTabs(
+    providerIds: ProviderId | ProviderId[],
+    fn: (service: ChatRuntime) => Promise<void>,
+  ): Promise<void> {
+    await this.broadcastToTabs(
+      this.filterTabsByProvider(providerIds, (tab) => tab.service?.providerId ?? tab.providerId),
+      fn,
+    );
+  }
+
+  private async broadcastToTabs(
+    tabs: Iterable<TabData>,
+    fn: (service: ChatRuntime) => Promise<void>,
+  ): Promise<void> {
     const promises: Promise<void>[] = [];
 
-    for (const tab of this.tabs.values()) {
+    for (const tab of tabs) {
       if (tab.service && tab.serviceInitialized) {
         promises.push(
           fn(tab.service).catch(() => {

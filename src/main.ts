@@ -401,6 +401,22 @@ export default class ClaudianPlugin extends Plugin {
       const affectedTabs = tabManager.getAllTabs().filter((tab) => (
         affectedProviderIds.includes(tab.providerId ?? DEFAULT_CHAT_PROVIDER_ID)
       ));
+      const syncTabRuntimeState = (tab: (typeof affectedTabs)[number]): void => {
+        if (!tab.service || !tab.serviceInitialized) {
+          return;
+        }
+
+        const conversation = tab.conversationId
+          ? this.getConversationSync(tab.conversationId)
+          : null;
+        const hasConversationContext = (conversation?.messages.length ?? 0) > 0;
+        const externalContextPaths = tab.ui.externalContextSelector?.getExternalContexts()
+          ?? (hasConversationContext
+            ? conversation?.externalContextPaths ?? []
+            : this.settings.persistentExternalContextPaths ?? []);
+
+        tab.service.syncConversationState(conversation, externalContextPaths);
+      };
 
       for (const tab of affectedTabs) {
         if (tab.state.isStreaming) {
@@ -415,6 +431,7 @@ export default class ClaudianPlugin extends Plugin {
             continue;
           }
           try {
+            syncTabRuntimeState(tab);
             tab.service.resetSession();
             await tab.service.ensureReady();
           } catch {
@@ -427,6 +444,7 @@ export default class ClaudianPlugin extends Plugin {
             continue;
           }
           try {
+            syncTabRuntimeState(tab);
             await tab.service.ensureReady({ force: true });
           } catch {
             failedTabs++;
