@@ -1794,6 +1794,34 @@ describe('TabManager - Provider Command Catalog', () => {
     expect(claudeCatalog.setRuntimeCommands).toHaveBeenCalledWith([]);
   });
 
+  it('awaits blank-tab provider warmup in the provider-change callback', async () => {
+    const manager = createManager();
+    const tab = await manager.createTab();
+    const options = mockInitializeTabUI.mock.calls[0][2];
+
+    let releaseWarmup!: () => void;
+    const prewarmSpy = jest.spyOn(manager as any, 'prewarmProviderTab').mockImplementation(
+      () => new Promise<void>((resolve) => {
+        releaseWarmup = resolve;
+      }),
+    );
+
+    let settled = false;
+    const callbackPromise = options.onProviderChanged('opencode').then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+
+    expect(prewarmSpy).toHaveBeenCalledWith(tab);
+    expect(settled).toBe(false);
+
+    releaseWarmup();
+    await callbackPromise;
+
+    expect(settled).toBe(true);
+  });
+
   it('should return null catalog config when provider has no catalog', async () => {
     // No catalog assigned to registry for 'claude'
 

@@ -776,7 +776,6 @@ function initializeInputToolbar(
           syncTabProviderServices(tab, plugin);
         }
         syncSlashCommandDropdownForProvider(tab, plugin, getProviderCatalogConfig);
-        onProviderChanged?.(newProvider);
 
         // Update settings for the new provider
         const uiConfig = ProviderRegistry.getChatUIConfig(newProvider);
@@ -784,6 +783,7 @@ function initializeInputToolbar(
           settings.model = model;
           uiConfig.applyModelDefaults(model, settings);
         });
+        await onProviderChanged?.(newProvider);
         tab.ui.thinkingBudgetSelector?.updateDisplay();
         tab.ui.serviceTierToggle?.updateDisplay();
         tab.ui.modelSelector?.updateDisplay();
@@ -899,7 +899,7 @@ function initializeInputToolbar(
 
 export interface InitializeTabUIOptions {
   getProviderCatalogConfig?: () => ProviderCatalogInfo;
-  onProviderChanged?: (providerId: ProviderId) => void;
+  onProviderChanged?: (providerId: ProviderId) => void | Promise<void>;
 }
 
 /**
@@ -1325,6 +1325,7 @@ export function initializeTabControllers(
     resetInputHeight: () => {
       // Per-tab input height is managed by CSS, no dynamic adjustment needed
     },
+    getAuxiliaryModel: () => tab.service?.getAuxiliaryModel?.() ?? tab.draftModel ?? null,
     getAgentService: () => tab.service,
     getSubagentManager: () => services.subagentManager,
     getTabProviderId: () => getTabProviderId(tab, plugin),

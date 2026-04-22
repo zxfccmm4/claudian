@@ -3477,6 +3477,40 @@ describe('Tab - Blank Tab Draft Model Change', () => {
     expect(mockServiceTierToggle.updateDisplay).toHaveBeenCalled();
   });
 
+  it('awaits async provider warmup callbacks before resolving blank-tab provider changes', async () => {
+    jest.spyOn(ProviderRegistry, 'createInstructionRefineService').mockReturnValue({ cancel: jest.fn(), resetConversation: jest.fn() } as any);
+    jest.spyOn(ProviderRegistry, 'createTitleGenerationService').mockReturnValue({ cancel: jest.fn() } as any);
+    jest.spyOn(ProviderRegistry, 'getTaskResultInterpreter').mockReturnValue({} as any);
+
+    const plugin = createMockPlugin();
+    const tab = createTab(createMockOptions({ plugin }));
+    let releaseWarmup!: () => void;
+    const onProviderChanged = jest.fn().mockImplementation(() => new Promise<void>((resolve) => {
+      releaseWarmup = resolve;
+    }));
+    initializeTabUI(tab, plugin, { onProviderChanged });
+
+    const toolbarModule = jest.requireMock('@/features/chat/ui/InputToolbar') as {
+      createInputToolbar: jest.Mock;
+    };
+    const toolbarCallbacks = toolbarModule.createInputToolbar.mock.calls.at(-1)?.[1];
+
+    let settled = false;
+    const changePromise = toolbarCallbacks.onModelChange('gpt-5.4')
+      .then(() => { settled = true; });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onProviderChanged).toHaveBeenCalledWith('codex');
+    expect(settled).toBe(false);
+
+    releaseWarmup();
+    await changePromise;
+
+    expect(settled).toBe(true);
+  });
+
   it('preserves the saved Codex fast preference when switching away and back', async () => {
     jest.spyOn(ProviderRegistry, 'createInstructionRefineService').mockReturnValue({ cancel: jest.fn(), resetConversation: jest.fn() } as any);
     jest.spyOn(ProviderRegistry, 'createTitleGenerationService').mockReturnValue({ cancel: jest.fn() } as any);

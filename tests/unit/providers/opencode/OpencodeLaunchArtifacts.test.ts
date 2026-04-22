@@ -23,6 +23,38 @@ describe('buildOpencodeManagedConfig', () => {
     });
   });
 
+  it('can create a dedicated aux agent and default it for the process', () => {
+    expect(buildOpencodeManagedConfig(
+      {},
+      '/vault/.claudian/opencode/aux/system.md',
+      undefined,
+      [{
+        definition: {
+          mode: 'primary',
+          permission: {
+            '*': 'deny',
+            read: 'allow',
+          },
+        },
+        id: 'claudian-aux-readonly',
+      }],
+      'claudian-aux-readonly',
+    )).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      agent: {
+        'claudian-aux-readonly': {
+          mode: 'primary',
+          permission: {
+            '*': 'deny',
+            read: 'allow',
+          },
+          prompt: '{file:/vault/.claudian/opencode/aux/system.md}',
+        },
+      },
+      default_agent: 'claudian-aux-readonly',
+    });
+  });
+
   it('merges the user config instead of replacing it', () => {
     expect(buildOpencodeManagedConfig({
       agent: {
@@ -93,6 +125,7 @@ describe('prepareOpencodeLaunchArtifacts', () => {
 
     expect(result.configPath).toBe(path.join(tmpRoot, '.claudian', 'opencode', 'config.json'));
     expect(result.systemPromptPath).toBe(path.join(tmpRoot, '.claudian', 'opencode', 'system.md'));
+    expect(result.configContent).toContain(`"prompt": "{file:${result.systemPromptPath}}"`);
     const generatedConfig = JSON.parse(await fs.readFile(result.configPath, 'utf8'));
     expect(generatedConfig).toMatchObject({
       default_agent: 'build',

@@ -455,6 +455,7 @@ export interface TitleGenerationService {
 export type RefineProgressCallback = (update: InstructionRefineResult) => void;
 
 export interface InstructionRefineService {
+  setModelOverride?(model?: string): void;
   resetConversation(): void;
   refineInstruction(
     rawInstruction: string,
@@ -501,6 +502,7 @@ export interface InlineEditResult {
 }
 
 export interface InlineEditService {
+  setModelOverride?(model?: string): void;
   resetConversation(): void;
   editText(request: InlineEditRequest): Promise<InlineEditResult>;
   continueConversation(message: string, contextFiles?: string[]): Promise<InlineEditResult>;

@@ -36,7 +36,7 @@ import type {
   ToolCallInfo,
 } from '../../../core/types';
 import type ClaudianPlugin from '../../../main';
-import { getEnhancedPath, parseEnvironmentVariables } from '../../../utils/env';
+import { getEnhancedPath } from '../../../utils/env';
 import { getVaultPath } from '../../../utils/path';
 import {
   AcpClientConnection,
@@ -87,6 +87,7 @@ import { getOpencodeProviderSettings, updateOpencodeProviderSettings } from '../
 import { getOpencodeState, type OpencodeProviderState } from '../types';
 import { buildOpencodePromptBlocks, buildOpencodePromptText } from './buildOpencodePrompt';
 import { prepareOpencodeLaunchArtifacts } from './OpencodeLaunchArtifacts';
+import { buildOpencodeRuntimeEnv } from './OpencodeRuntimeEnvironment';
 
 interface ActiveTurn {
   queue: StreamChunkQueue;
@@ -621,18 +622,11 @@ export class OpencodeChatRuntime implements ChatRuntime {
     cliPath: string,
     databasePathOverride?: string | null,
   ): NodeJS.ProcessEnv {
-    const envText = getRuntimeEnvironmentText(
+    return buildOpencodeRuntimeEnv(
       this.plugin.settings as unknown as Record<string, unknown>,
-      'opencode',
+      cliPath,
+      databasePathOverride,
     );
-    const envVars = parseEnvironmentVariables(envText);
-    return {
-      ...process.env,
-      ...envVars,
-      OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: 'true',
-      ...(databasePathOverride ? { OPENCODE_DB: databasePathOverride } : {}),
-      PATH: getEnhancedPath(envVars.PATH, cliPath || undefined),
-    };
   }
 
   private getProviderSettings(): Record<string, unknown> {
@@ -664,11 +658,25 @@ export class OpencodeChatRuntime implements ChatRuntime {
       ? providerSettings.effortLevel
       : OPENCODE_DEFAULT_THINKING_LEVEL;
     const normalizedBaseRawModelId = resolveOpencodeBaseModelRawId(selectedBaseRawModelId, discoveredModels);
-    return combineOpencodeRawModelSelection(
+    const resolvedRawModelId = combineOpencodeRawModelSelection(
       normalizedBaseRawModelId,
       effortLevel,
       discoveredModels,
     );
+    if (!resolvedRawModelId) {
+      return null;
+    }
+
+    const availableModelIds = new Set(discoveredModels.map((model) => model.rawId));
+    if (availableModelIds.size > 0 && !availableModelIds.has(resolvedRawModelId)) {
+      return null;
+    }
+
+    return resolvedRawModelId;
+  }
+
+  getAuxiliaryModel(): string | null {
+    return this.getActiveDisplayModel() ?? null;
   }
 
   private getActiveDisplayModel(queryOptions?: ChatRuntimeQueryOptions): string | undefined {

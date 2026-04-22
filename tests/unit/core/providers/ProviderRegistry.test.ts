@@ -71,6 +71,14 @@ describe('ProviderRegistry', () => {
     expect(caps.reasoningControl).toBe('effort');
   });
 
+  it('returns OpenCode capabilities', () => {
+    const caps = ProviderRegistry.getCapabilities('opencode');
+    expect(caps.providerId).toBe('opencode');
+    expect(caps.supportsProviderCommands).toBe(true);
+    expect(caps.supportsInstructionMode).toBe(true);
+    expect(caps.supportsFork).toBe(false);
+  });
+
   it('lists registered provider ids', () => {
     const ids = ProviderRegistry.getRegisteredProviderIds();
     expect(ids).toContain('claude');

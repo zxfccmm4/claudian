@@ -199,9 +199,13 @@ export class TabManager implements TabManagerInterface {
     // Initialize UI components with provider catalog
     initializeTabUI(tab, this.plugin, {
       getProviderCatalogConfig: () => this.getProviderCatalogConfig(tab),
-      onProviderChanged: (providerId) => {
+      onProviderChanged: async (providerId) => {
         this.callbacks.onTabProviderChanged?.(tab.id, providerId);
-        this.maybePrimeProviderRuntime(tab);
+        try {
+          await this.prewarmProviderTab(tab);
+        } catch {
+          // Keep provider switching non-blocking even if metadata warmup fails.
+        }
       },
     });
 

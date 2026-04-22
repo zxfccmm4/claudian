@@ -9,7 +9,7 @@ export const OPENCODE_PROVIDER_CAPABILITIES: Readonly<ProviderCapabilities> = Ob
   supportsFork: false,
   supportsProviderCommands: true,
   supportsImageAttachments: true,
-  supportsInstructionMode: false,
+  supportsInstructionMode: true,
   supportsMcpTools: false,
   supportsTurnSteer: false,
   reasoningControl: 'effort',

@@ -14,30 +14,61 @@ const OPENCODE_SYSTEM_PROMPT_AGENT_IDS = ['build', 'plan'] as const;
 
 export interface OpencodeLaunchArtifacts {
   configPath: string;
+  configContent: string;
   databasePath: string | null;
   launchKey: string;
   systemPromptPath: string;
 }
 
+export interface OpencodeManagedAgentConfig {
+  definition?: Record<string, unknown>;
+  id: string;
+}
+
+const DEFAULT_OPENCODE_MANAGED_AGENT_CONFIGS: readonly OpencodeManagedAgentConfig[] =
+  OPENCODE_SYSTEM_PROMPT_AGENT_IDS.map((id) => ({ id }));
+
 export interface PrepareOpencodeLaunchArtifactsParams {
+  artifactsSubdir?: string;
+  defaultAgentId?: string;
+  managedAgents?: readonly OpencodeManagedAgentConfig[];
   runtimeEnv: NodeJS.ProcessEnv;
-  settings: SystemPromptSettings;
+  settings?: SystemPromptSettings;
+  systemPromptKey?: string;
+  systemPromptText?: string;
+  userName?: string;
   workspaceRoot: string;
 }
 
 export async function prepareOpencodeLaunchArtifacts(
   params: PrepareOpencodeLaunchArtifactsParams,
 ): Promise<OpencodeLaunchArtifacts> {
-  const artifactsDir = path.join(params.workspaceRoot, CLAUDIAN_STORAGE_PATH, 'opencode');
+  const artifactsDir = path.join(
+    params.workspaceRoot,
+    CLAUDIAN_STORAGE_PATH,
+    params.artifactsSubdir ?? 'opencode',
+  );
   const systemPromptPath = path.join(artifactsDir, 'system.md');
   const configPath = path.join(artifactsDir, 'config.json');
-  const systemPrompt = `${buildSystemPrompt(params.settings)}\n`;
+  const systemPrompt = normalizeSystemPrompt(
+    params.systemPromptText ?? buildSystemPrompt(requireSettings(params)),
+  );
+  const promptKey = params.systemPromptKey
+    ?? (params.systemPromptText !== undefined
+      ? params.systemPromptText
+      : computeSystemPromptKey(requireSettings(params)));
   const baseConfig = await loadOpencodeBaseConfig(
     params.runtimeEnv.OPENCODE_CONFIG,
     params.workspaceRoot,
   );
-  const config = `${JSON.stringify(
-    buildOpencodeManagedConfig(baseConfig, systemPromptPath, params.settings.userName),
+  const configContent = `${JSON.stringify(
+    buildOpencodeManagedConfig(
+      baseConfig,
+      systemPromptPath,
+      params.userName ?? params.settings?.userName,
+      params.managedAgents,
+      params.defaultAgentId,
+    ),
     null,
     2,
   )}\n`;
@@ -45,14 +76,15 @@ export async function prepareOpencodeLaunchArtifacts(
 
   await fs.mkdir(artifactsDir, { recursive: true });
   await writeIfChanged(systemPromptPath, systemPrompt);
-  await writeIfChanged(configPath, config);
+  await writeIfChanged(configPath, configContent);
 
   return {
     configPath,
+    configContent,
     databasePath,
     launchKey: [
-      computeSystemPromptKey(params.settings),
-      config,
+      promptKey,
+      configContent,
       databasePath ?? '',
       params.runtimeEnv.OPENCODE_DB ?? '',
       params.runtimeEnv.XDG_DATA_HOME ?? '',
@@ -65,6 +97,8 @@ export function buildOpencodeManagedConfig(
   baseConfig: Record<string, unknown>,
   systemPromptPath: string,
   userName?: string,
+  managedAgents: readonly OpencodeManagedAgentConfig[] = DEFAULT_OPENCODE_MANAGED_AGENT_CONFIGS,
+  defaultAgentId?: string,
 ): Record<string, unknown> {
   const config: Record<string, unknown> = {
     ...baseConfig,
@@ -76,18 +110,27 @@ export function buildOpencodeManagedConfig(
     ? { ...baseConfig.agent }
     : {};
   const nextAgents: Record<string, unknown> = { ...existingAgents };
+  const agentConfigs = managedAgents.length > 0
+    ? managedAgents
+    : DEFAULT_OPENCODE_MANAGED_AGENT_CONFIGS;
 
-  for (const agentId of OPENCODE_SYSTEM_PROMPT_AGENT_IDS) {
-    const existingAgent = isPlainObject(existingAgents[agentId])
-      ? { ...existingAgents[agentId] }
+  for (const agentConfig of agentConfigs) {
+    const existingAgentValue = existingAgents[agentConfig.id];
+    const existingAgent = isPlainObject(existingAgentValue)
+      ? { ...existingAgentValue }
       : {};
-    nextAgents[agentId] = {
+    nextAgents[agentConfig.id] = {
       ...existingAgent,
+      ...(isPlainObject(agentConfig.definition) ? agentConfig.definition : {}),
       prompt: `{file:${systemPromptPath}}`,
     };
   }
 
   config.agent = nextAgents;
+  const trimmedDefaultAgentId = defaultAgentId?.trim();
+  if (trimmedDefaultAgentId) {
+    config.default_agent = trimmedDefaultAgentId;
+  }
 
   const trimmedUserName = userName?.trim();
   if (trimmedUserName) {
@@ -135,4 +178,18 @@ async function loadOpencodeBaseConfig(
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeSystemPrompt(systemPrompt: string): string {
+  return systemPrompt.endsWith('\n') ? systemPrompt : `${systemPrompt}\n`;
+}
+
+function requireSettings(
+  params: PrepareOpencodeLaunchArtifactsParams,
+): SystemPromptSettings {
+  if (params.settings) {
+    return params.settings;
+  }
+
+  throw new Error('prepareOpencodeLaunchArtifacts requires settings when no systemPromptText is provided');
 }

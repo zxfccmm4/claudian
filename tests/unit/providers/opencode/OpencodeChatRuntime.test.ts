@@ -94,6 +94,7 @@ describe('OpencodeChatRuntime', () => {
       expect(params.runtimeEnv.OPENCODE_DB).toBe('/persisted/opencode.db');
       return {
         configPath: '/tmp/claudian-opencode-config.json',
+        configContent: '{}\n',
         databasePath: '/persisted/opencode.db',
         launchKey: 'launch-key',
         systemPromptPath: '/tmp/claudian-opencode-system.md',
@@ -137,6 +138,7 @@ describe('OpencodeChatRuntime', () => {
       expect(params.runtimeEnv.OPENCODE_DB).toBeUndefined();
       return {
         configPath: '/tmp/claudian-opencode-config.json',
+        configContent: '{}\n',
         databasePath: '/default/opencode.db',
         launchKey: 'launch-key',
         systemPromptPath: '/tmp/claudian-opencode-system.md',
@@ -170,6 +172,7 @@ describe('OpencodeChatRuntime', () => {
       expect(params.runtimeEnv.OPENCODE_DB).toBe(':memory:');
       return {
         configPath: '/tmp/claudian-opencode-config.json',
+        configContent: '{}\n',
         databasePath: ':memory:',
         launchKey: 'launch-key',
         systemPromptPath: '/tmp/claudian-opencode-system.md',
@@ -479,5 +482,36 @@ describe('OpencodeChatRuntime', () => {
     expect((runtime as any).resolveSelectedRawModelId()).toBe('anthropic/claude-sonnet-4/high');
     expect(plugin.saveSettings).not.toHaveBeenCalled();
     expect(refreshModelSelector).not.toHaveBeenCalled();
+  });
+
+  it('exposes the active display model for auxiliary OpenCode tasks', () => {
+    const plugin = createMockPlugin({
+      settings: {
+        effortLevel: 'high',
+        model: 'opencode:anthropic/claude-sonnet-4',
+        providerConfigs: {
+          opencode: {
+            discoveredModels: [
+              { label: 'Anthropic/Claude Sonnet 4', rawId: 'anthropic/claude-sonnet-4' },
+              { label: 'Anthropic/Claude Sonnet 4 (high)', rawId: 'anthropic/claude-sonnet-4/high' },
+            ],
+            preferredThinkingByModel: {
+              'anthropic/claude-sonnet-4': 'high',
+            },
+            visibleModels: ['anthropic/claude-sonnet-4'],
+          },
+        },
+        savedProviderModel: {
+          opencode: 'opencode:anthropic/claude-sonnet-4',
+        },
+        settingsProvider: 'opencode',
+      },
+    });
+    const runtime = new OpencodeChatRuntime(plugin);
+
+    jest.spyOn(ProviderRegistry, 'resolveSettingsProviderId').mockReturnValue('opencode');
+    jest.spyOn(ProviderSettingsCoordinator, 'getProviderSettingsSnapshot').mockReturnValue(plugin.settings);
+
+    expect(runtime.getAuxiliaryModel()).toBe('opencode:anthropic/claude-sonnet-4/high');
   });
 });

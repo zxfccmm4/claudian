@@ -88,6 +88,7 @@ function createMockAgentService() {
     clearApprovedPlanContent: jest.fn(),
     ensureReady: jest.fn().mockResolvedValue(true),
     getSessionId: jest.fn().mockReturnValue(null),
+    getAuxiliaryModel: jest.fn().mockReturnValue(null),
     consumeTurnMetadata: jest.fn().mockReturnValue({}),
   };
 }
@@ -98,6 +99,7 @@ function createMockInstructionRefineService(overrides: Record<string, jest.Mock>
     resetConversation: jest.fn(),
     continueConversation: jest.fn(),
     cancel: jest.fn(),
+    setModelOverride: jest.fn(),
     ...overrides,
   };
 }
@@ -2487,6 +2489,29 @@ describe('InputController - Message Queue', () => {
       expect(mockInstructionRefineService.refineInstruction).toHaveBeenCalledWith(
         'add logging',
         ''
+      );
+    });
+
+    it('should pass the active chat model into instruction refine service', async () => {
+      const mockInstructionRefineService = createMockInstructionRefineService({
+        refineInstruction: jest.fn().mockResolvedValue({
+          success: true,
+          refinedInstruction: 'refined instruction',
+        }),
+      });
+
+      deps = createMockDeps({
+        getAuxiliaryModel: () => 'opencode:openai/gpt-5.4',
+        getInstructionRefineService: () => mockInstructionRefineService as any,
+      });
+      deps.plugin.settings.systemPrompt = '';
+
+      controller = new InputController(deps);
+
+      await controller.handleInstructionSubmit('add logging');
+
+      expect(mockInstructionRefineService.setModelOverride).toHaveBeenCalledWith(
+        'opencode:openai/gpt-5.4',
       );
     });
 
