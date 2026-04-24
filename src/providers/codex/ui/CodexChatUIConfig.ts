@@ -1,4 +1,3 @@
-import { getRuntimeEnvironmentVariables } from '../../../core/providers/providerEnvironment';
 import type {
   ProviderChatUIConfig,
   ProviderPermissionModeToggleConfig,
@@ -7,9 +6,9 @@ import type {
   ProviderUIOption,
 } from '../../../core/providers/types';
 import { OPENAI_PROVIDER_ICON } from '../../../shared/icons';
+import { getCodexModelOptions } from '../modelOptions';
 import {
   DEFAULT_CODEX_MODEL_SET,
-  DEFAULT_CODEX_MODELS,
   DEFAULT_CODEX_PRIMARY_MODEL,
   FAST_TIER_CODEX_DESCRIPTION,
   FAST_TIER_CODEX_MODEL,
@@ -47,17 +46,7 @@ function looksLikeCodexModel(model: string): boolean {
 
 export const codexChatUIConfig: ProviderChatUIConfig = {
   getModelOptions(settings: Record<string, unknown>): ProviderUIOption[] {
-    const envVars = getRuntimeEnvironmentVariables(settings, 'codex');
-    if (envVars.OPENAI_MODEL) {
-      const customModel = envVars.OPENAI_MODEL;
-      if (!DEFAULT_CODEX_MODEL_SET.has(customModel)) {
-        return [
-          { value: customModel, label: customModel, description: 'Custom (env)' },
-          ...DEFAULT_CODEX_MODELS,
-        ];
-      }
-    }
-    return [...DEFAULT_CODEX_MODELS];
+    return getCodexModelOptions(settings);
   },
 
   ownsModel(model: string, settings: Record<string, unknown>): boolean {
@@ -93,7 +82,7 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
   },
 
   normalizeModelVariant(model: string, settings: Record<string, unknown>): string {
-    if (this.getModelOptions(settings).some((option) => option.value === model)) {
+    if (getCodexModelOptions(settings).some((option) => option.value === model)) {
       return model;
     }
 
