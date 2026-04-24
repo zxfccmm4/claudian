@@ -283,6 +283,7 @@ export interface TabBarItem {
   /** 1-based index for display. */
   index: number;
   title: string;
+  providerId: ProviderId;
   isActive: boolean;
   isStreaming: boolean;
   needsAttention: boolean;

@@ -188,10 +188,12 @@ export class ClaudianView extends ItemView {
         onTabTitleChanged: () => this.updateTabBar(),
         onTabAttentionChanged: () => this.updateTabBar(),
         onTabConversationChanged: () => {
+          this.updateTabBar();
           this.persistTabState();
           this.syncProviderBrandColor();
         },
         onTabProviderChanged: () => {
+          this.updateTabBar();
           this.syncProviderBrandColor();
         },
       }

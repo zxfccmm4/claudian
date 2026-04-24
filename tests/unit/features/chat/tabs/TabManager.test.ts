@@ -600,6 +600,7 @@ describe('TabManager - Tab Bar Data', () => {
       expect(items[0]).toHaveProperty('id');
       expect(items[0]).toHaveProperty('index');
       expect(items[0]).toHaveProperty('title');
+      expect(items[0]).toHaveProperty('providerId');
       expect(items[0]).toHaveProperty('isActive');
       expect(items[0]).toHaveProperty('isStreaming');
       expect(items[0]).toHaveProperty('needsAttention');
@@ -626,6 +627,30 @@ describe('TabManager - Tab Bar Data', () => {
 
       expect(items[0].isStreaming).toBe(false);
       expect(items[1].isStreaming).toBe(true);
+    });
+
+    it('should resolve badge provider from the live tab context', async () => {
+      manager = createManager({
+        plugin: createMockPlugin({
+          getConversationSync: jest.fn().mockImplementation((conversationId: string) => (
+            conversationId === 'conv-codex'
+              ? { id: 'conv-codex', providerId: 'codex' }
+              : null
+          )),
+        }),
+        tabFactory: () => createMockTabData({
+          id: 'tab-1',
+          providerId: 'claude',
+          conversationId: 'conv-codex',
+          state: { isStreaming: true },
+        }),
+      });
+
+      await manager.createTab();
+
+      const items = manager.getTabBarItems();
+
+      expect(items[0].providerId).toBe('codex');
     });
   });
 });
