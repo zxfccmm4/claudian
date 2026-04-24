@@ -150,6 +150,7 @@ describe('OpenCode settings normalization', () => {
       savedProviderModel: {
         opencode: 'opencode:google/gemini-2.5-pro',
       },
+      titleGenerationModel: 'opencode:google/gemini-2.5-pro',
     };
 
     const next = updateOpencodeProviderSettings(settings, {
@@ -161,6 +162,26 @@ describe('OpenCode settings normalization', () => {
     expect(settings.effortLevel).toBe('high');
     expect((settings.savedProviderModel as Record<string, string>).opencode).toBe('opencode:openai/gpt-5');
     expect((settings.savedProviderEffort as Record<string, string>).opencode).toBe('high');
+    expect(settings.titleGenerationModel).toBe('opencode:openai/gpt-5');
+  });
+
+  it('clears the OpenCode title model when all visible models are removed', () => {
+    const settings: Record<string, unknown> = {
+      providerConfigs: {
+        opencode: {
+          discoveredModels,
+          visibleModels: ['google/gemini-2.5-pro'],
+        },
+      },
+      titleGenerationModel: 'opencode:google/gemini-2.5-pro',
+    };
+
+    const next = updateOpencodeProviderSettings(settings, {
+      visibleModels: [],
+    });
+
+    expect(next.visibleModels).toEqual([]);
+    expect(settings.titleGenerationModel).toBe('');
   });
 
   it('keeps runtime discovery in memory when updating provider settings', () => {

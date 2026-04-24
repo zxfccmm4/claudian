@@ -19,6 +19,7 @@ import {
   OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
   updateOpencodeProviderSettings,
 } from '../settings';
+import { OpencodeAgentSettings } from './OpencodeAgentSettings';
 
 const ALL_PROVIDERS_KEY = 'all';
 
@@ -122,18 +123,23 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
       clearOpencodeDiscoveryState(settingsBag);
       await context.plugin.saveSettings();
       opencodeWorkspace?.cliResolver?.reset();
-      const view = context.plugin.getView();
-      const tabManager = view?.getTabManager();
-      if (tabManager?.broadcastToProviderTabs) {
-        await tabManager.broadcastToProviderTabs('opencode', (service) => Promise.resolve(service.cleanup()));
-      } else {
-        await tabManager?.broadcastToAllTabs(
-          (service) => Promise.resolve(service.cleanup()),
-        );
-      }
-      view?.invalidateProviderCommandCaches?.(['opencode']);
-      view?.refreshModelSelector?.();
+      await recycleOpencodeRuntime();
       return true;
+    };
+
+    const recycleOpencodeRuntime = async (): Promise<void> => {
+      for (const view of context.plugin.getAllViews()) {
+        const tabManager = view.getTabManager();
+        if (tabManager?.broadcastToProviderTabs) {
+          await tabManager.broadcastToProviderTabs('opencode', (service) => Promise.resolve(service.cleanup()));
+        } else {
+          await tabManager?.broadcastToAllTabs(
+            (service) => Promise.resolve(service.cleanup()),
+          );
+        }
+        view.invalidateProviderCommandCaches?.(['opencode']);
+        view.refreshModelSelector?.();
+      }
     };
 
     cliPathSetting.addText((text) => {
@@ -516,6 +522,27 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
       desc: 'Hide specific OpenCode commands and skills from the dropdown. Enter names without the leading slash, one per line.',
       placeholder: 'compact\nreview\nfix',
     });
+
+    if (opencodeWorkspace?.agentStorage) {
+      new Setting(container).setName('Subagents').setHeading();
+
+      const subagentsDesc = container.createDiv({ cls: 'claudian-sp-settings-desc' });
+      subagentsDesc.createEl('p', {
+        cls: 'setting-item-description',
+        text: 'Manage vault-level OpenCode subagents from .opencode/agent/ and legacy .opencode/agents/. New entries are saved as subagent-only files and appear in the @mention menu.',
+      });
+
+      const subagentsContainer = container.createDiv({ cls: 'claudian-slash-commands-container' });
+      new OpencodeAgentSettings(
+        subagentsContainer,
+        opencodeWorkspace.agentStorage,
+        context.plugin.app,
+        async () => {
+          await opencodeWorkspace.refreshAgentMentions?.();
+          await recycleOpencodeRuntime();
+        },
+      );
+    }
 
     renderEnvironmentSettingsSection({
       container,

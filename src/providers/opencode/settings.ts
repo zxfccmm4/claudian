@@ -287,6 +287,12 @@ function retargetRemovedOpencodeSelections(
   next: OpencodeProviderSettings,
 ): void {
   if (next.visibleModels.length === 0) {
+    if (
+      typeof settings.titleGenerationModel === 'string'
+      && isOpencodeModelSelectionId(settings.titleGenerationModel)
+    ) {
+      settings.titleGenerationModel = '';
+    }
     return;
   }
 
@@ -320,5 +326,10 @@ function retargetRemovedOpencodeSelections(
   if (nextTopLevelModel) {
     settings.model = nextTopLevelModel;
     settings.effortLevel = fallbackEffort;
+  }
+
+  const nextTitleGenerationModel = maybeRetargetModel(settings.titleGenerationModel);
+  if (nextTitleGenerationModel) {
+    settings.titleGenerationModel = nextTitleGenerationModel;
   }
 }

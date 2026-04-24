@@ -7,7 +7,17 @@ const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockRenderEnvironmentSettingsSection = jest.fn();
 const mockSaveSettings = jest.fn().mockResolvedValue(undefined);
 const mockBroadcastToProviderTabs = jest.fn().mockResolvedValue(undefined);
+const mockRefreshAgentMentions = jest.fn().mockResolvedValue(undefined);
+const mockInvalidateProviderCommandCaches = jest.fn();
+const mockRefreshModelSelector = jest.fn();
 const mockCliResolverReset = jest.fn();
+const mockAgentStorage = {};
+const mockCreatedAgentSettings: Array<{
+  app: unknown;
+  containerEl: unknown;
+  onChanged?: () => Promise<void> | void;
+  storage: unknown;
+}> = [];
 
 jest.mock('fs');
 jest.mock('obsidian', () => {
@@ -61,11 +71,31 @@ jest.mock('@/features/settings/ui/EnvironmentSettingsSection', () => ({
   renderEnvironmentSettingsSection: (...args: unknown[]) => mockRenderEnvironmentSettingsSection(...args),
 }));
 
+jest.mock('@/providers/opencode/ui/OpencodeAgentSettings', () => ({
+  OpencodeAgentSettings: class MockOpencodeAgentSettings {
+    constructor(
+      containerEl: unknown,
+      storage: unknown,
+      app: unknown,
+      onChanged?: () => Promise<void> | void,
+    ) {
+      mockCreatedAgentSettings.push({
+        app,
+        containerEl,
+        onChanged,
+        storage,
+      });
+    }
+  },
+}));
+
 jest.mock('@/providers/opencode/app/OpencodeWorkspaceServices', () => ({
   maybeGetOpencodeWorkspaceServices: jest.fn(() => ({
+    agentStorage: mockAgentStorage,
     cliResolver: {
       reset: mockCliResolverReset,
     },
+    refreshAgentMentions: mockRefreshAgentMentions,
   })),
 }));
 
@@ -249,6 +279,21 @@ function createContainer(): any {
 }
 
 function createPlugin(overrides: Record<string, unknown> = {}): any {
+  const viewA = {
+    getTabManager: jest.fn(() => ({
+      broadcastToProviderTabs: mockBroadcastToProviderTabs,
+    })),
+    invalidateProviderCommandCaches: mockInvalidateProviderCommandCaches,
+    refreshModelSelector: mockRefreshModelSelector,
+  };
+  const viewB = {
+    getTabManager: jest.fn(() => ({
+      broadcastToProviderTabs: mockBroadcastToProviderTabs,
+    })),
+    invalidateProviderCommandCaches: mockInvalidateProviderCommandCaches,
+    refreshModelSelector: mockRefreshModelSelector,
+  };
+
   return {
     settings: {
       providerConfigs: {
@@ -268,13 +313,8 @@ function createPlugin(overrides: Record<string, unknown> = {}): any {
       ...overrides,
     },
     saveSettings: mockSaveSettings,
-    getView: jest.fn(() => ({
-      getTabManager: jest.fn(() => ({
-        broadcastToProviderTabs: mockBroadcastToProviderTabs,
-      })),
-      invalidateProviderCommandCaches: jest.fn(),
-      refreshModelSelector: jest.fn(),
-    })),
+    getView: jest.fn(() => viewA),
+    getAllViews: jest.fn(() => [viewA, viewB]),
   };
 }
 
@@ -302,12 +342,13 @@ describe('OpencodeSettingsTab', () => {
   beforeEach(() => {
     createdSettings.length = 0;
     createdElements.length = 0;
+    mockCreatedAgentSettings.length = 0;
     jest.clearAllMocks();
     mockedExistsSync.mockReturnValue(false);
     mockedStatSync.mockReturnValue({ isFile: () => true } as fs.Stats);
   });
 
-  it('stores the CLI path per host and resets active runtime state', async () => {
+  it('stores the CLI path per host and resets active runtime state across all views', async () => {
     mockedExistsSync.mockImplementation((filePath: fs.PathLike) => String(filePath) === '/custom/opencode');
     const plugin = createPlugin();
 
@@ -321,11 +362,13 @@ describe('OpencodeSettingsTab', () => {
     });
     expect(mockSaveSettings).toHaveBeenCalledTimes(1);
     expect(mockCliResolverReset).toHaveBeenCalledTimes(1);
-    expect(mockBroadcastToProviderTabs).toHaveBeenCalledTimes(1);
+    expect(mockBroadcastToProviderTabs).toHaveBeenCalledTimes(2);
     expect(mockBroadcastToProviderTabs).toHaveBeenCalledWith(
       'opencode',
       expect.any(Function),
     );
+    expect(mockInvalidateProviderCommandCaches).toHaveBeenCalledTimes(2);
+    expect(mockRefreshModelSelector).toHaveBeenCalledTimes(2);
   });
 
   it('renders a notice explaining where vault-level commands and skills are managed', () => {
@@ -349,6 +392,34 @@ describe('OpencodeSettingsTab', () => {
       tag: 'p',
       text: 'OpenCode can auto-detect vault-level Claude slash commands from .claude/commands/ and skills from .claude/skills/, .codex/skills/, and .agents/skills/. Manage those entries in the Claude or Codex settings tab. This setting only hides entries from the OpenCode dropdown.',
     });
+  });
+
+  it('renders vault subagent settings and refreshes runtime state when they change', async () => {
+    const plugin = createPlugin();
+
+    opencodeSettingsTabRenderer.render(createContainer(), createContext(plugin));
+
+    expect(findSetting('Subagents').heading).toBe(true);
+    expect(createdElements).toContainEqual({
+      cls: 'setting-item-description',
+      tag: 'p',
+      text: 'Manage vault-level OpenCode subagents from .opencode/agent/ and legacy .opencode/agents/. New entries are saved as subagent-only files and appear in the @mention menu.',
+    });
+
+    expect(mockCreatedAgentSettings).toHaveLength(1);
+    expect(mockCreatedAgentSettings[0].storage).toBe(mockAgentStorage);
+
+    await mockCreatedAgentSettings[0].onChanged?.();
+
+    expect(mockRefreshAgentMentions).toHaveBeenCalledTimes(1);
+    expect(mockBroadcastToProviderTabs).toHaveBeenCalledTimes(2);
+    expect(mockBroadcastToProviderTabs).toHaveBeenCalledWith(
+      'opencode',
+      expect.any(Function),
+    );
+    expect(mockInvalidateProviderCommandCaches).toHaveBeenCalledTimes(2);
+    expect(mockInvalidateProviderCommandCaches).toHaveBeenCalledWith(['opencode']);
+    expect(mockRefreshModelSelector).toHaveBeenCalledTimes(2);
   });
 
   it('passes the default Exa env var into the environment section copy', () => {

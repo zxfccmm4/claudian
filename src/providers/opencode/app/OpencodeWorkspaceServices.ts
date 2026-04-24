@@ -5,12 +5,17 @@ import type {
   ProviderWorkspaceRegistration,
   ProviderWorkspaceServices,
 } from '../../../core/providers/types';
+import type { VaultFileAdapter } from '../../../core/storage/VaultFileAdapter';
+import { OpencodeAgentMentionProvider } from '../agents/OpencodeAgentMentionProvider';
 import { OpencodeCommandCatalog } from '../commands/OpencodeCommandCatalog';
 import { OpencodeCliResolver } from '../runtime/OpencodeCliResolver';
+import { OpencodeAgentStorage } from '../storage/OpencodeAgentStorage';
 import { opencodeSettingsTabRenderer } from '../ui/OpencodeSettingsTab';
 import { OpencodeRuntimeCommandLoader } from './OpencodeRuntimeCommandLoader';
 
 export interface OpencodeWorkspaceServices extends ProviderWorkspaceServices {
+  agentStorage: OpencodeAgentStorage;
+  agentMentionProvider: OpencodeAgentMentionProvider;
   commandCatalog: ProviderCommandCatalog;
 }
 
@@ -20,18 +25,29 @@ const opencodeTabWarmupPolicy: ProviderTabWarmupPolicy = {
   },
 };
 
-export async function createOpencodeWorkspaceServices(): Promise<OpencodeWorkspaceServices> {
+export async function createOpencodeWorkspaceServices(
+  vaultAdapter: VaultFileAdapter,
+): Promise<OpencodeWorkspaceServices> {
+  const agentStorage = new OpencodeAgentStorage(vaultAdapter);
+  const agentMentionProvider = new OpencodeAgentMentionProvider(agentStorage);
+  await agentMentionProvider.loadAgents();
+
   return {
+    agentStorage,
+    agentMentionProvider,
     commandCatalog: new OpencodeCommandCatalog(),
     cliResolver: new OpencodeCliResolver(),
     runtimeCommandLoader: new OpencodeRuntimeCommandLoader(),
     settingsTabRenderer: opencodeSettingsTabRenderer,
     tabWarmupPolicy: opencodeTabWarmupPolicy,
+    refreshAgentMentions: async () => {
+      await agentMentionProvider.loadAgents();
+    },
   };
 }
 
 export const opencodeWorkspaceRegistration: ProviderWorkspaceRegistration<OpencodeWorkspaceServices> = {
-  initialize: async () => createOpencodeWorkspaceServices(),
+  initialize: async ({ vaultAdapter }) => createOpencodeWorkspaceServices(vaultAdapter),
 };
 
 export function maybeGetOpencodeWorkspaceServices(): OpencodeWorkspaceServices | null {
