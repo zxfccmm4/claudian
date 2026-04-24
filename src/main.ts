@@ -35,6 +35,7 @@ import { type InlineEditContext, InlineEditModal } from './features/inline-edit/
 import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
 import { setLocale } from './i18n/i18n';
 import type { Locale } from './i18n/types';
+import { OPENCODE_PLAN_MODE_ID, OPENCODE_SAFE_MODE_ID } from './providers/opencode/modes';
 import { buildCursorContext } from './utils/editor';
 import { getVaultPath } from './utils/path';
 
@@ -265,6 +266,26 @@ export default class ClaudianPlugin extends Plugin {
     // doesn't start stuck in plan mode after a restart (prePlanPermissionMode is lost)
     if (this.settings.permissionMode === 'plan') {
       this.settings.permissionMode = 'normal';
+    }
+    if (
+      this.settings.savedProviderPermissionMode
+      && typeof this.settings.savedProviderPermissionMode === 'object'
+      && !Array.isArray(this.settings.savedProviderPermissionMode)
+    ) {
+      for (const [providerId, mode] of Object.entries(this.settings.savedProviderPermissionMode)) {
+        if (mode === 'plan') {
+          this.settings.savedProviderPermissionMode[providerId] = 'normal';
+        }
+      }
+    }
+    const opencodeConfig = this.settings.providerConfigs?.opencode;
+    if (
+      opencodeConfig
+      && typeof opencodeConfig === 'object'
+      && !Array.isArray(opencodeConfig)
+      && opencodeConfig.selectedMode === OPENCODE_PLAN_MODE_ID
+    ) {
+      opencodeConfig.selectedMode = OPENCODE_SAFE_MODE_ID;
     }
 
     const didNormalizeProviderSelection = ProviderSettingsCoordinator.normalizeProviderSelection(

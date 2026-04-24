@@ -12,6 +12,7 @@ const PROJECTION_KEYS = new Set([
   'effortLevel',
   'serviceTier',
   'thinkingBudget',
+  'permissionMode',
 ]);
 
 type ProviderProjectionMap = Partial<Record<string, string>>;
@@ -22,7 +23,12 @@ function getSettingsProviderId(settings: Record<string, unknown>): ProviderId {
 
 function ensureProjectionMap(
   settings: Record<string, unknown>,
-  key: 'savedProviderModel' | 'savedProviderEffort' | 'savedProviderServiceTier' | 'savedProviderThinkingBudget',
+  key:
+  | 'savedProviderModel'
+  | 'savedProviderEffort'
+  | 'savedProviderServiceTier'
+  | 'savedProviderThinkingBudget'
+  | 'savedProviderPermissionMode',
 ): ProviderProjectionMap {
   const current = settings[key];
   if (current && typeof current === 'object') {
@@ -41,7 +47,19 @@ function cloneProviderSettings(settings: Record<string, unknown>): Record<string
     savedProviderEffort: { ...(settings.savedProviderEffort as ProviderProjectionMap | undefined) },
     savedProviderServiceTier: { ...(settings.savedProviderServiceTier as ProviderProjectionMap | undefined) },
     savedProviderThinkingBudget: { ...(settings.savedProviderThinkingBudget as ProviderProjectionMap | undefined) },
+    savedProviderPermissionMode: { ...(settings.savedProviderPermissionMode as ProviderProjectionMap | undefined) },
   };
+}
+
+function normalizeToggleValue(
+  value: unknown,
+  allowedValues: Set<string>,
+): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  return allowedValues.has(value) ? value : undefined;
 }
 
 function mergeProviderSettings(
@@ -159,6 +177,7 @@ export class ProviderSettingsCoordinator {
     const savedEffort = ensureProjectionMap(settings, 'savedProviderEffort');
     const savedServiceTier = ensureProjectionMap(settings, 'savedProviderServiceTier');
     const savedBudget = ensureProjectionMap(settings, 'savedProviderThinkingBudget');
+    const savedPermissionMode = ensureProjectionMap(settings, 'savedProviderPermissionMode');
     const uiConfig = ProviderRegistry.getChatUIConfig(providerId);
     const normalizedModel = normalizeProviderModel(
       uiConfig,
@@ -182,6 +201,9 @@ export class ProviderSettingsCoordinator {
     if (typeof settings.thinkingBudget === 'string') {
       savedBudget[providerId] = settings.thinkingBudget;
     }
+    if (typeof settings.permissionMode === 'string' && uiConfig.getPermissionModeToggle?.()) {
+      savedPermissionMode[providerId] = settings.permissionMode;
+    }
   }
 
   static projectProviderState(
@@ -193,6 +215,7 @@ export class ProviderSettingsCoordinator {
     const savedEffort = settings.savedProviderEffort as ProviderProjectionMap | undefined;
     const savedServiceTier = settings.savedProviderServiceTier as ProviderProjectionMap | undefined;
     const savedBudget = settings.savedProviderThinkingBudget as ProviderProjectionMap | undefined;
+    const savedPermissionMode = settings.savedProviderPermissionMode as ProviderProjectionMap | undefined;
 
     const shouldPreferCurrentProjection = providerId === getSettingsProviderId(settings);
     const currentModelRaw = typeof settings.model === 'string' ? settings.model : '';
@@ -266,6 +289,35 @@ export class ProviderSettingsCoordinator {
 
     if (usesBudget) {
       settings.thinkingBudget = normalizeReasoningValue(uiConfig, settings, model, settings.thinkingBudget);
+    }
+
+    const permissionToggle = uiConfig.getPermissionModeToggle?.() ?? null;
+    if (!permissionToggle) {
+      return;
+    }
+
+    const allowedPermissionModes = new Set([
+      permissionToggle.inactiveValue,
+      permissionToggle.activeValue,
+      ...(permissionToggle.planValue ? [permissionToggle.planValue] : []),
+    ]);
+    const currentPermissionMode = normalizeToggleValue(settings.permissionMode, allowedPermissionModes);
+    const derivedPermissionMode = normalizeToggleValue(
+      uiConfig.resolvePermissionMode?.(settings),
+      allowedPermissionModes,
+    );
+    const savedPermissionModeValue = normalizeToggleValue(
+      savedPermissionMode?.[providerId],
+      allowedPermissionModes,
+    );
+
+    const projectedPermissionMode = savedPermissionModeValue
+      ?? derivedPermissionMode
+      ?? (shouldPreferCurrentProjection ? currentPermissionMode : undefined)
+      ?? currentPermissionMode;
+
+    if (projectedPermissionMode !== undefined) {
+      settings.permissionMode = projectedPermissionMode;
     }
   }
 

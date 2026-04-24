@@ -38,6 +38,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   savedProviderEffort: {},
   savedProviderServiceTier: {},
   savedProviderThinkingBudget: {},
+  savedProviderPermissionMode: {},
 
   lastCustomModel: '',
 

@@ -220,7 +220,7 @@ describe('OpenCode settings normalization', () => {
     expect((settings.providerConfigs as Record<string, any>).opencode.discoveredModels).toBeUndefined();
   });
 
-  it('normalizes saved custom OpenCode modes back to the managed build mode', () => {
+  it('normalizes saved custom OpenCode modes back to the managed YOLO mode', () => {
     expect(getOpencodeProviderSettings({
       providerConfigs: {
         opencode: {
@@ -228,7 +228,18 @@ describe('OpenCode settings normalization', () => {
           selectedMode: 'compaction',
         },
       },
-    }).selectedMode).toBe('build');
+    }).selectedMode).toBe('claudian-yolo');
+  });
+
+  it('normalizes the legacy build alias back to the managed YOLO mode', () => {
+    expect(getOpencodeProviderSettings({
+      providerConfigs: {
+        opencode: {
+          availableModes: [],
+          selectedMode: 'build',
+        },
+      },
+    }).selectedMode).toBe('claudian-yolo');
   });
 
   it('preserves legacy cliPath when no host-scoped path exists', () => {

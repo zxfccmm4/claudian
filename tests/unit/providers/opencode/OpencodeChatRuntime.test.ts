@@ -1,5 +1,10 @@
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
+import {
+  OPENCODE_BUILD_MODE_ID,
+  OPENCODE_SAFE_MODE_ID,
+  OPENCODE_YOLO_MODE_ID,
+} from '@/providers/opencode/modes';
 import { OpencodeChatRuntime } from '@/providers/opencode/runtime/OpencodeChatRuntime';
 import * as launchArtifacts from '@/providers/opencode/runtime/OpencodeLaunchArtifacts';
 import { getOpencodeProviderSettings } from '@/providers/opencode/settings';
@@ -320,15 +325,16 @@ describe('OpencodeChatRuntime', () => {
     const runtime = new OpencodeChatRuntime(plugin);
 
     await (runtime as any).syncSessionModeState({
-      currentModeId: 'build',
+      currentModeId: OPENCODE_BUILD_MODE_ID,
     });
 
-    expect(plugin.settings.providerConfigs.opencode.selectedMode).toBe('build');
+    expect(plugin.settings.providerConfigs.opencode.selectedMode).toBe(OPENCODE_YOLO_MODE_ID);
   });
 
-  it('defaults OpenCode mode selection to build before ACP mode discovery finishes', () => {
+  it('defaults OpenCode mode selection to the managed YOLO mode before ACP mode discovery finishes', () => {
     const plugin = createMockPlugin({
       settings: {
+        permissionMode: 'yolo',
         providerConfigs: {
           opencode: {
             availableModes: [],
@@ -340,12 +346,13 @@ describe('OpencodeChatRuntime', () => {
     const runtime = new OpencodeChatRuntime(plugin);
     jest.spyOn(ProviderSettingsCoordinator, 'getProviderSettingsSnapshot').mockReturnValue(plugin.settings);
 
-    expect((runtime as any).resolveSelectedModeId()).toBe('build');
+    expect((runtime as any).resolveSelectedModeId()).toBe(OPENCODE_YOLO_MODE_ID);
   });
 
-  it('falls back to build when a saved custom mode is not managed by Claudian', () => {
+  it('falls back to the managed YOLO mode when a saved custom mode is not managed by Claudian', () => {
     const plugin = createMockPlugin({
       settings: {
+        permissionMode: 'yolo',
         providerConfigs: {
           opencode: {
             availableModes: [],
@@ -357,17 +364,19 @@ describe('OpencodeChatRuntime', () => {
     const runtime = new OpencodeChatRuntime(plugin);
     jest.spyOn(ProviderSettingsCoordinator, 'getProviderSettingsSnapshot').mockReturnValue(plugin.settings);
 
-    expect((runtime as any).resolveSelectedModeId()).toBe('build');
+    expect((runtime as any).resolveSelectedModeId()).toBe(OPENCODE_YOLO_MODE_ID);
   });
 
-  it('prefers build/plan over auxiliary OpenCode primary modes for the main toolbar', () => {
+  it('prefers managed YOLO/safe/plan modes over auxiliary OpenCode primary modes for the main toolbar', () => {
     const plugin = createMockPlugin({
       settings: {
+        permissionMode: 'yolo',
         providerConfigs: {
           opencode: {
             availableModes: [
-              { id: 'build', name: 'build' },
+              { id: OPENCODE_BUILD_MODE_ID, name: 'build' },
               { id: 'compaction', name: 'compaction' },
+              { id: OPENCODE_SAFE_MODE_ID, name: 'claudian-safe' },
               { id: 'plan', name: 'plan' },
             ],
             selectedMode: '',
@@ -378,7 +387,65 @@ describe('OpencodeChatRuntime', () => {
     const runtime = new OpencodeChatRuntime(plugin);
     jest.spyOn(ProviderSettingsCoordinator, 'getProviderSettingsSnapshot').mockReturnValue(plugin.settings);
 
-    expect((runtime as any).resolveSelectedModeId()).toBe('build');
+    expect((runtime as any).resolveSelectedModeId()).toBe(OPENCODE_YOLO_MODE_ID);
+  });
+
+  it('maps shared safe mode onto the managed OpenCode safe agent', () => {
+    const plugin = createMockPlugin({
+      settings: {
+        permissionMode: 'normal',
+        providerConfigs: {
+          opencode: {
+            availableModes: [
+              { id: OPENCODE_YOLO_MODE_ID, name: 'YOLO' },
+              { id: OPENCODE_SAFE_MODE_ID, name: 'Safe' },
+              { id: 'plan', name: 'Plan' },
+            ],
+            selectedMode: OPENCODE_YOLO_MODE_ID,
+          },
+        },
+      },
+    });
+    const runtime = new OpencodeChatRuntime(plugin);
+    jest.spyOn(ProviderSettingsCoordinator, 'getProviderSettingsSnapshot').mockReturnValue(plugin.settings);
+
+    expect((runtime as any).resolveSelectedModeId()).toBe(OPENCODE_SAFE_MODE_ID);
+  });
+
+  it('syncs managed OpenCode safe mode back through the permission-mode callback', async () => {
+    const plugin = createMockPlugin({
+      settings: {
+        providerConfigs: {
+          opencode: {
+            availableModes: [],
+            selectedMode: '',
+          },
+        },
+      },
+    });
+    const runtime = new OpencodeChatRuntime(plugin);
+    const syncCallback = jest.fn();
+
+    runtime.setPermissionModeSyncCallback(syncCallback);
+
+    await (runtime as any).syncSessionModeState({
+      currentModeId: OPENCODE_SAFE_MODE_ID,
+    });
+
+    expect(syncCallback).toHaveBeenCalledWith('normal');
+  });
+
+  it('maps the legacy build alias back through the permission-mode callback as YOLO', async () => {
+    const runtime = new OpencodeChatRuntime(createMockPlugin());
+    const syncCallback = jest.fn();
+
+    runtime.setPermissionModeSyncCallback(syncCallback);
+
+    await (runtime as any).syncSessionModeState({
+      currentModeId: OPENCODE_BUILD_MODE_ID,
+    });
+
+    expect(syncCallback).toHaveBeenCalledWith('yolo');
   });
 
   it('summarizes workflow approval prompts with tool metadata', async () => {

@@ -81,6 +81,8 @@ import {
   getManagedOpencodeModes,
   isManagedOpencodeModeId,
   normalizeOpencodeAvailableModes,
+  resolveOpencodeModeForPermissionMode,
+  resolvePermissionModeForManagedOpencodeMode,
 } from '../modes';
 import { createOpencodeToolStreamAdapter } from '../normalization/opencodeToolNormalization';
 import { getOpencodeProviderSettings, updateOpencodeProviderSettings } from '../settings';
@@ -147,6 +149,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
   private currentSessionModeId: string | null = null;
   private currentTurnMetadata: ChatTurnMetadata = {};
   private loadedSessionId: string | null = null;
+  private permissionModeSyncCallback: ((mode: string) => void) | null = null;
   private process: AcpSubprocess | null = null;
   private promptUsage: AcpUsage | null = null;
   private readonly readyListeners: Array<(ready: boolean) => void> = [];
@@ -474,7 +477,9 @@ export class OpencodeChatRuntime implements ChatRuntime {
 
   setExitPlanModeCallback(_callback: ExitPlanModeCallback | null): void {}
 
-  setPermissionModeSyncCallback(_callback: ((sdkMode: string) => void) | null): void {}
+  setPermissionModeSyncCallback(callback: ((sdkMode: string) => void) | null): void {
+    this.permissionModeSyncCallback = callback;
+  }
 
   setSubagentHookProvider(_getState: () => SubagentRuntimeState): void {}
 
@@ -704,8 +709,17 @@ export class OpencodeChatRuntime implements ChatRuntime {
   }
 
   private resolveSelectedModeId(): string | null {
-    const opencodeSettings = getOpencodeProviderSettings(this.getProviderSettings());
+    const providerSettings = this.getProviderSettings();
+    const opencodeSettings = getOpencodeProviderSettings(providerSettings);
     const availableModes = getManagedOpencodeModes(opencodeSettings.availableModes);
+    const mappedModeId = resolveOpencodeModeForPermissionMode(
+      providerSettings.permissionMode,
+      opencodeSettings.availableModes,
+    );
+    if (mappedModeId) {
+      return mappedModeId;
+    }
+
     if (opencodeSettings.selectedMode) {
       if (
         availableModes.some((mode) => mode.id === opencodeSettings.selectedMode)
@@ -886,6 +900,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     const currentModeId = params.currentModeId ?? acpState.currentModeId;
     if (currentModeId) {
       this.currentSessionModeId = currentModeId;
+      this.emitPermissionModeSync(currentModeId);
     }
 
     const settingsBag = this.plugin.settings as unknown as Record<string, unknown>;
@@ -911,6 +926,19 @@ export class OpencodeChatRuntime implements ChatRuntime {
   private refreshModelSelectors(): void {
     for (const view of this.plugin.getAllViews()) {
       view.refreshModelSelector();
+    }
+  }
+
+  private emitPermissionModeSync(modeId: string): void {
+    const permissionMode = resolvePermissionModeForManagedOpencodeMode(modeId);
+    if (!permissionMode || !this.permissionModeSyncCallback) {
+      return;
+    }
+
+    try {
+      this.permissionModeSyncCallback(permissionMode);
+    } catch {
+      // Non-critical UI sync callback.
     }
   }
 

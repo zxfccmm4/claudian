@@ -4,20 +4,33 @@ export interface OpencodeMode {
   name: string;
 }
 
+export const OPENCODE_BUILD_MODE_ID = 'build';
+export const OPENCODE_YOLO_MODE_ID = 'claudian-yolo';
+export const OPENCODE_SAFE_MODE_ID = 'claudian-safe';
+export const OPENCODE_PLAN_MODE_ID = 'plan';
+
 export const OPENCODE_FALLBACK_MODES: ReadonlyArray<OpencodeMode> = Object.freeze([
   {
     description: 'The default agent. Executes tools based on configured permissions.',
-    id: 'build',
-    name: 'build',
+    id: OPENCODE_YOLO_MODE_ID,
+    name: 'yolo',
+  },
+  {
+    description: 'Safe mode. Asks before shell commands and file edits.',
+    id: OPENCODE_SAFE_MODE_ID,
+    name: 'safe',
   },
   {
     description: 'Plan mode. Disallows all edit tools.',
-    id: 'plan',
-    name: 'plan',
+    id: OPENCODE_PLAN_MODE_ID,
+    name: OPENCODE_PLAN_MODE_ID,
   },
 ]);
 
-const OPENCODE_MANAGED_MODE_IDS = new Set(OPENCODE_FALLBACK_MODES.map((mode) => mode.id));
+const OPENCODE_MANAGED_MODE_IDS = new Set([
+  OPENCODE_BUILD_MODE_ID,
+  ...OPENCODE_FALLBACK_MODES.map((mode) => mode.id),
+]);
 
 export function normalizeOpencodeAvailableModes(value: unknown): OpencodeMode[] {
   if (!Array.isArray(value)) {
@@ -67,10 +80,6 @@ export function getManagedOpencodeModes(modes: OpencodeMode[]): OpencodeMode[] {
   ));
 }
 
-export function getOpencodeToolbarModes(modes: OpencodeMode[]): OpencodeMode[] {
-  return getManagedOpencodeModes(modes);
-}
-
 export function normalizeOpencodeSelectedMode(
   value: unknown,
 ): string {
@@ -95,8 +104,46 @@ export function normalizeManagedOpencodeSelectedMode(
     return '';
   }
 
+  const canonicalModeId = normalized === OPENCODE_BUILD_MODE_ID
+    ? OPENCODE_YOLO_MODE_ID
+    : normalized;
   const managedModes = getManagedOpencodeModes(modes);
-  return managedModes.some((mode) => mode.id === normalized)
-    ? normalized
+  return managedModes.some((mode) => mode.id === canonicalModeId)
+    ? canonicalModeId
     : (managedModes[0]?.id ?? '');
+}
+
+export function resolveOpencodeModeForPermissionMode(
+  permissionMode: unknown,
+  modes: OpencodeMode[] = [],
+): string {
+  const managedModes = getManagedOpencodeModes(modes);
+  const managedModeIds = new Set(managedModes.map((mode) => mode.id));
+
+  if (permissionMode === 'plan' && managedModeIds.has(OPENCODE_PLAN_MODE_ID)) {
+    return OPENCODE_PLAN_MODE_ID;
+  }
+  if (permissionMode === 'normal' && managedModeIds.has(OPENCODE_SAFE_MODE_ID)) {
+    return OPENCODE_SAFE_MODE_ID;
+  }
+  if (managedModeIds.has(OPENCODE_YOLO_MODE_ID)) {
+    return OPENCODE_YOLO_MODE_ID;
+  }
+
+  return managedModes[0]?.id ?? '';
+}
+
+export function resolvePermissionModeForManagedOpencodeMode(
+  modeId: unknown,
+): 'normal' | 'plan' | 'yolo' | null {
+  if (modeId === OPENCODE_BUILD_MODE_ID || modeId === OPENCODE_YOLO_MODE_ID) {
+    return 'yolo';
+  }
+  if (modeId === OPENCODE_SAFE_MODE_ID) {
+    return 'normal';
+  }
+  if (modeId === OPENCODE_PLAN_MODE_ID) {
+    return 'plan';
+  }
+  return null;
 }

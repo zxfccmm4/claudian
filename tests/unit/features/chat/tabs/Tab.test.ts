@@ -1025,14 +1025,14 @@ describe('Tab - Service Initialization', () => {
       expect(plugin.saveSettings).toHaveBeenCalled();
     });
 
-    it('persists provider-owned mode selections for OpenCode tabs', async () => {
+    it('maps shared permission mode selections onto managed OpenCode modes', async () => {
       const plugin = createMockPlugin({
         settings: {
           excludedTags: [],
           model: 'claude-sonnet-4-5',
           thinkingBudget: 'low',
           effortLevel: 'high',
-          permissionMode: 'default',
+          permissionMode: 'yolo',
           keyboardNavigation: {
             scrollUpKey: 'k',
             scrollDownKey: 'j',
@@ -1043,11 +1043,12 @@ describe('Tab - Service Initialization', () => {
           providerConfigs: {
             opencode: {
               availableModes: [
-                { id: 'build', name: 'Build' },
+                { id: 'claudian-yolo', name: 'YOLO' },
+                { id: 'claudian-safe', name: 'Safe' },
                 { id: 'plan', name: 'Plan' },
               ],
               enabled: true,
-              selectedMode: 'build',
+              selectedMode: 'claudian-yolo',
             },
           },
           savedProviderEffort: {
@@ -1057,6 +1058,9 @@ describe('Tab - Service Initialization', () => {
           savedProviderModel: {
             claude: 'claude-sonnet-4-5',
             opencode: 'opencode:openai/gpt-5',
+          },
+          savedProviderPermissionMode: {
+            claude: 'yolo',
           },
         },
       });
@@ -1075,19 +1079,23 @@ describe('Tab - Service Initialization', () => {
       }));
 
       initializeTabUI(tab, plugin);
-      expect(mockPermissionToggle.setVisible).toHaveBeenLastCalledWith(false);
+      expect(mockPermissionToggle.setVisible).toHaveBeenLastCalledWith(true);
 
       const toolbarModule = jest.requireMock('@/features/chat/ui/InputToolbar') as {
         createInputToolbar: jest.Mock;
       };
       const toolbarCallbacks = toolbarModule.createInputToolbar.mock.calls.at(-1)?.[1];
 
-      await toolbarCallbacks.onModeChange('plan');
+      await toolbarCallbacks.onPermissionModeChange('normal');
 
-      expect(plugin.settings.providerConfigs.opencode.selectedMode).toBe('plan');
+      expect(plugin.settings.providerConfigs.opencode.selectedMode).toBe('claudian-safe');
+      expect(plugin.settings.savedProviderPermissionMode).toEqual(expect.objectContaining({
+        claude: 'yolo',
+        opencode: 'normal',
+      }));
+      expect(plugin.settings.permissionMode).toBe('yolo');
       expect(plugin.saveSettings).toHaveBeenCalled();
-      expect(mockModeSelector.updateDisplay).toHaveBeenCalled();
-      expect(mockModeSelector.renderOptions).toHaveBeenCalled();
+      expect(mockPermissionToggle.updateDisplay).toHaveBeenCalled();
     });
 
     it('resets to blank state when the new-conversation callback fires', () => {

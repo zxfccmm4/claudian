@@ -114,7 +114,7 @@ export class ClaudianView extends ItemView {
       tab.ui.serviceTierToggle?.updateDisplay();
       tab.dom.inputWrapper.toggleClass(
         'claudian-input-plan-mode',
-        this.plugin.settings.permissionMode === 'plan' && capabilities.supportsPlanMode,
+        providerSettings.permissionMode === 'plan' && capabilities.supportsPlanMode,
       );
     }
 
@@ -543,7 +543,10 @@ export class ClaudianView extends ItemView {
         if (!activeTab) return;
         const providerId = getTabProviderId(activeTab, this.plugin);
         if (!ProviderRegistry.getCapabilities(providerId).supportsPlanMode) return;
-        const current = this.plugin.settings.permissionMode;
+        const current = ProviderSettingsCoordinator.getProviderSettingsSnapshot(
+          this.plugin.settings as unknown as Record<string, unknown>,
+          providerId,
+        ).permissionMode as string;
         if (current === 'plan') {
           const restoreMode = activeTab.state.prePlanPermissionMode ?? 'normal';
           activeTab.state.prePlanPermissionMode = null;

@@ -1,11 +1,15 @@
 import {
   getEffectiveOpencodeModes,
   getManagedOpencodeModes,
-  getOpencodeToolbarModes,
   normalizeManagedOpencodeSelectedMode,
   normalizeOpencodeAvailableModes,
   normalizeOpencodeSelectedMode,
+  OPENCODE_BUILD_MODE_ID,
   OPENCODE_FALLBACK_MODES,
+  OPENCODE_SAFE_MODE_ID,
+  OPENCODE_YOLO_MODE_ID,
+  resolveOpencodeModeForPermissionMode,
+  resolvePermissionModeForManagedOpencodeMode,
 } from '../../../../src/providers/opencode/modes';
 import { opencodeChatUIConfig } from '../../../../src/providers/opencode/ui/OpencodeChatUIConfig';
 
@@ -30,183 +34,118 @@ describe('OpenCode mode settings', () => {
     expect(getEffectiveOpencodeModes([])).toEqual(OPENCODE_FALLBACK_MODES);
   });
 
-  it('filters auxiliary OpenCode primary modes out of the toolbar selector', () => {
-    expect(getOpencodeToolbarModes([
-      { id: 'build', name: 'build' },
-      { id: 'compaction', name: 'compaction' },
-      { id: 'plan', name: 'plan' },
-      { id: 'summary', name: 'summary' },
-      { id: 'title', name: 'title' },
-    ])).toEqual([
-      { id: 'build', name: 'build' },
-        { id: 'plan', name: 'plan' },
-    ]);
-  });
-
-  it('keeps Claudian on managed build/plan modes even when discovery only reports custom agents', () => {
+  it('keeps Claudian on managed YOLO/safe/plan modes even when discovery only reports custom agents', () => {
     expect(getManagedOpencodeModes([
       { id: 'compaction', name: 'compaction' },
       { id: 'summary', name: 'summary' },
     ])).toEqual(OPENCODE_FALLBACK_MODES);
   });
 
-  it('normalizes saved custom mode selections back to build', () => {
-    expect(normalizeManagedOpencodeSelectedMode('compaction')).toBe('build');
+  it('normalizes saved custom mode selections back to the managed YOLO mode', () => {
+    expect(normalizeManagedOpencodeSelectedMode('compaction')).toBe(OPENCODE_YOLO_MODE_ID);
+  });
+
+  it('normalizes the legacy build id back to the managed YOLO mode', () => {
+    expect(normalizeManagedOpencodeSelectedMode(OPENCODE_BUILD_MODE_ID)).toBe(OPENCODE_YOLO_MODE_ID);
+  });
+
+  it('maps shared permission modes onto managed OpenCode modes', () => {
+    expect(resolveOpencodeModeForPermissionMode('yolo')).toBe(OPENCODE_YOLO_MODE_ID);
+    expect(resolveOpencodeModeForPermissionMode('normal')).toBe(OPENCODE_SAFE_MODE_ID);
+    expect(resolveOpencodeModeForPermissionMode('plan')).toBe('plan');
+  });
+
+  it('maps managed OpenCode modes back to shared permission modes', () => {
+    expect(resolvePermissionModeForManagedOpencodeMode(OPENCODE_BUILD_MODE_ID)).toBe('yolo');
+    expect(resolvePermissionModeForManagedOpencodeMode(OPENCODE_YOLO_MODE_ID)).toBe('yolo');
+    expect(resolvePermissionModeForManagedOpencodeMode(OPENCODE_SAFE_MODE_ID)).toBe('normal');
+    expect(resolvePermissionModeForManagedOpencodeMode('plan')).toBe('plan');
+    expect(resolvePermissionModeForManagedOpencodeMode('summary')).toBeNull();
   });
 });
 
-describe('opencodeChatUIConfig.getModeSelector', () => {
-  it('returns a shared toolbar config for discovered OpenCode modes', () => {
+describe('opencodeChatUIConfig permission mode wiring', () => {
+  it('exposes the shared Safe/YOLO/Plan toggle instead of a provider-owned mode selector', () => {
     expect(opencodeChatUIConfig.getModeSelector?.({
       providerConfigs: {
         opencode: {
           availableModes: [
-            { id: 'build', name: 'Build', description: 'Default editing agent' },
-            { id: 'plan', name: 'Plan', description: 'Planning-first agent' },
+            { id: OPENCODE_YOLO_MODE_ID, name: 'YOLO' },
+            { id: OPENCODE_SAFE_MODE_ID, name: 'Safe' },
+            { id: 'plan', name: 'Plan' },
           ],
+          selectedMode: OPENCODE_SAFE_MODE_ID,
+        },
+      },
+    }) ?? null).toBeNull();
+
+    expect(opencodeChatUIConfig.getPermissionModeToggle?.()).toEqual({
+      activeLabel: 'YOLO',
+      activeValue: 'yolo',
+      inactiveLabel: 'Safe',
+      inactiveValue: 'normal',
+      planLabel: 'Plan',
+      planValue: 'plan',
+    });
+  });
+
+  it('derives shared permission mode from the saved managed OpenCode mode', () => {
+    expect(opencodeChatUIConfig.resolvePermissionMode?.({
+      providerConfigs: {
+        opencode: {
+          selectedMode: OPENCODE_BUILD_MODE_ID,
+        },
+      },
+    })).toBe('yolo');
+
+    expect(opencodeChatUIConfig.resolvePermissionMode?.({
+      providerConfigs: {
+        opencode: {
+          selectedMode: OPENCODE_SAFE_MODE_ID,
+        },
+      },
+    })).toBe('normal');
+
+    expect(opencodeChatUIConfig.resolvePermissionMode?.({
+      providerConfigs: {
+        opencode: {
+          selectedMode: OPENCODE_YOLO_MODE_ID,
+        },
+      },
+    })).toBe('yolo');
+
+    expect(opencodeChatUIConfig.resolvePermissionMode?.({
+      providerConfigs: {
+        opencode: {
           selectedMode: 'plan',
         },
       },
-    })).toEqual({
-      activeValue: 'build',
-      label: 'Mode',
-      options: [
-        { description: 'Default editing agent', label: 'Build', value: 'build' },
-        { description: 'Planning-first agent', label: 'Plan', value: 'plan' },
-      ],
-      value: 'plan',
-    });
+    })).toBe('plan');
   });
 
-  it('fills in the managed plan mode when OpenCode discovery only reports build', () => {
-    expect(opencodeChatUIConfig.getModeSelector?.({
+  it('maps shared permission mode changes back into managed OpenCode modes', () => {
+    const settings: Record<string, unknown> = {
+      permissionMode: 'yolo',
       providerConfigs: {
         opencode: {
           availableModes: [
-            { id: 'build', name: 'Build' },
+            { id: OPENCODE_YOLO_MODE_ID, name: 'YOLO' },
+            { id: OPENCODE_SAFE_MODE_ID, name: 'Safe' },
+            { id: 'plan', name: 'Plan' },
           ],
-          selectedMode: 'build',
+          selectedMode: OPENCODE_YOLO_MODE_ID,
         },
       },
-    })).toEqual({
-      activeValue: 'build',
-      label: 'Mode',
-      options: [
-        { label: 'Build', value: 'build' },
-        {
-          description: 'Plan mode. Disallows all edit tools.',
-          label: 'Plan',
-          value: 'plan',
-        },
-      ],
-      value: 'build',
-    });
-  });
+    };
 
-  it('shows fallback build/plan modes before ACP discovery finishes', () => {
-    expect(opencodeChatUIConfig.getModeSelector?.({
-      providerConfigs: {
-        opencode: {
-          availableModes: [],
-          selectedMode: '',
-        },
-      },
-    })).toEqual({
-      activeValue: 'build',
-      label: 'Mode',
-      options: [
-        {
-          description: 'The default agent. Executes tools based on configured permissions.',
-          label: 'Build',
-          value: 'build',
-        },
-        {
-          description: 'Plan mode. Disallows all edit tools.',
-          label: 'Plan',
-          value: 'plan',
-        },
-      ],
-      value: 'build',
-    });
-  });
+    opencodeChatUIConfig.applyPermissionMode?.('normal', settings);
+    expect(settings.permissionMode).toBe('normal');
+    expect((settings.providerConfigs as Record<string, Record<string, unknown>>).opencode.selectedMode).toBe(OPENCODE_SAFE_MODE_ID);
 
-  it('falls back to build/plan when a saved custom mode cannot be managed safely', () => {
-    expect(opencodeChatUIConfig.getModeSelector?.({
-      providerConfigs: {
-        opencode: {
-          availableModes: [],
-          selectedMode: 'compaction',
-        },
-      },
-    })).toEqual({
-      activeValue: 'build',
-      label: 'Mode',
-      options: [
-        {
-          description: 'The default agent. Executes tools based on configured permissions.',
-          label: 'Build',
-          value: 'build',
-        },
-        {
-          description: 'Plan mode. Disallows all edit tools.',
-          label: 'Plan',
-          value: 'plan',
-        },
-      ],
-      value: 'build',
-    });
-  });
+    opencodeChatUIConfig.applyPermissionMode?.('plan', settings);
+    expect((settings.providerConfigs as Record<string, Record<string, unknown>>).opencode.selectedMode).toBe('plan');
 
-  it('keeps the toolbar on build/plan even when OpenCode reports auxiliary primary modes', () => {
-    expect(opencodeChatUIConfig.getModeSelector?.({
-      providerConfigs: {
-        opencode: {
-          availableModes: [
-            { description: 'Default editing agent', id: 'build', name: 'build' },
-            { description: 'Internal compaction agent', id: 'compaction', name: 'compaction' },
-            { description: 'Planning-first agent', id: 'plan', name: 'plan' },
-          ],
-          selectedMode: 'plan',
-        },
-      },
-    })).toEqual({
-      activeValue: 'build',
-      label: 'Mode',
-      options: [
-        { description: 'Default editing agent', label: 'Build', value: 'build' },
-        { description: 'Planning-first agent', label: 'Plan', value: 'plan' },
-      ],
-      value: 'plan',
-    });
-  });
-
-  it('ignores custom-only discovery and still shows managed build/plan modes', () => {
-    expect(opencodeChatUIConfig.getModeSelector?.({
-      providerConfigs: {
-        opencode: {
-          availableModes: [
-            { description: 'Internal compaction agent', id: 'compaction', name: 'compaction' },
-            { description: 'Internal summary agent', id: 'summary', name: 'summary' },
-          ],
-          selectedMode: 'summary',
-        },
-      },
-    })).toEqual({
-      activeValue: 'build',
-      label: 'Mode',
-      options: [
-        {
-          description: 'The default agent. Executes tools based on configured permissions.',
-          label: 'Build',
-          value: 'build',
-        },
-        {
-          description: 'Plan mode. Disallows all edit tools.',
-          label: 'Plan',
-          value: 'plan',
-        },
-      ],
-      value: 'build',
-    });
+    opencodeChatUIConfig.applyPermissionMode?.('yolo', settings);
+    expect((settings.providerConfigs as Record<string, Record<string, unknown>>).opencode.selectedMode).toBe(OPENCODE_YOLO_MODE_ID);
   });
 });

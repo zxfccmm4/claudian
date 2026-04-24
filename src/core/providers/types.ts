@@ -261,6 +261,12 @@ export interface ProviderChatUIConfig {
   /** Optional permission-mode toggle descriptor. Return null when the provider exposes no permission toggle UI. */
   getPermissionModeToggle?(): ProviderPermissionModeToggleConfig | null;
 
+  /** Optional provider-owned mapping back into the shared permission-mode contract. */
+  resolvePermissionMode?(settings: Record<string, unknown>): string | null;
+
+  /** Optional hook when the toolbar changes permission mode. */
+  applyPermissionMode?(value: string, settings: unknown): void;
+
   /** Optional service-tier toggle descriptor. Return null when the provider exposes no fast/standard UI. */
   getServiceTierToggle?(settings: Record<string, unknown>): ProviderServiceTierToggleConfig | null;
 

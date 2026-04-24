@@ -8,9 +8,13 @@ import {
   type SystemPromptSettings,
 } from '../../../core/prompt/mainAgent';
 import { expandHomePath } from '../../../utils/path';
+import {
+  OPENCODE_BUILD_MODE_ID,
+  OPENCODE_PLAN_MODE_ID,
+  OPENCODE_SAFE_MODE_ID,
+  OPENCODE_YOLO_MODE_ID,
+} from '../modes';
 import { resolveOpencodeDatabasePath } from './OpencodePaths';
-
-const OPENCODE_SYSTEM_PROMPT_AGENT_IDS = ['build', 'plan'] as const;
 
 export interface OpencodeLaunchArtifacts {
   configPath: string;
@@ -25,8 +29,32 @@ export interface OpencodeManagedAgentConfig {
   id: string;
 }
 
-const DEFAULT_OPENCODE_MANAGED_AGENT_CONFIGS: readonly OpencodeManagedAgentConfig[] =
-  OPENCODE_SYSTEM_PROMPT_AGENT_IDS.map((id) => ({ id }));
+const DEFAULT_OPENCODE_MANAGED_AGENT_CONFIGS: readonly OpencodeManagedAgentConfig[] = [
+  { id: OPENCODE_BUILD_MODE_ID },
+  {
+    definition: {
+      mode: 'primary',
+      permission: {
+        plan_enter: 'allow',
+        question: 'allow',
+      },
+    },
+    id: OPENCODE_YOLO_MODE_ID,
+  },
+  {
+    definition: {
+      mode: 'primary',
+      permission: {
+        plan_enter: 'allow',
+        question: 'allow',
+        bash: 'ask',
+        edit: 'ask',
+      },
+    },
+    id: OPENCODE_SAFE_MODE_ID,
+  },
+  { id: OPENCODE_PLAN_MODE_ID },
+];
 
 export interface PrepareOpencodeLaunchArtifactsParams {
   artifactsSubdir?: string;

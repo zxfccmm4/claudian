@@ -1,6 +1,6 @@
 import type {
   ProviderChatUIConfig,
-  ProviderModeSelectorConfig,
+  ProviderPermissionModeToggleConfig,
   ProviderReasoningOption,
   ProviderUIOption,
 } from '../../../core/providers/types';
@@ -15,13 +15,24 @@ import {
   OPENCODE_SYNTHETIC_MODEL_ID,
   resolveOpencodeBaseModelRawId,
 } from '../models';
-import { getManagedOpencodeModes, type OpencodeMode } from '../modes';
+import {
+  resolveOpencodeModeForPermissionMode,
+  resolvePermissionModeForManagedOpencodeMode,
+} from '../modes';
 import { getOpencodeProviderSettings, updateOpencodeProviderSettings } from '../settings';
 
 const OPENCODE_MODELS: ProviderUIOption[] = [
   { value: OPENCODE_SYNTHETIC_MODEL_ID, label: 'OpenCode', description: 'ACP runtime' },
 ];
 const DEFAULT_CONTEXT_WINDOW = 200_000;
+const OPENCODE_PERMISSION_MODE_TOGGLE: ProviderPermissionModeToggleConfig = {
+  inactiveValue: 'normal',
+  inactiveLabel: 'Safe',
+  activeValue: 'yolo',
+  activeLabel: 'YOLO',
+  planValue: 'plan',
+  planLabel: 'Plan',
+};
 
 export const opencodeChatUIConfig: ProviderChatUIConfig = {
   getModelOptions(settings): ProviderUIOption[] {
@@ -213,36 +224,31 @@ export const opencodeChatUIConfig: ProviderChatUIConfig = {
     return new Set<string>();
   },
 
-  getModeSelector(settings: Record<string, unknown>): ProviderModeSelectorConfig | null {
-    const opencodeSettings = getOpencodeProviderSettings(settings);
-    const availableModes = getManagedOpencodeModes(opencodeSettings.availableModes);
-    if (availableModes.length <= 1) {
-      return null;
-    }
-
-    const selectedMode = availableModes.some((mode: OpencodeMode) => mode.id === opencodeSettings.selectedMode)
-      ? opencodeSettings.selectedMode
-      : availableModes[0]?.id || '';
-
-    return {
-      activeValue: 'build',
-      label: 'Mode',
-      options: availableModes.map((mode: OpencodeMode) => ({
-        ...(mode.description ? { description: mode.description } : {}),
-        label: formatOpencodeModeLabel(mode.name),
-        value: mode.id,
-      })),
-      value: selectedMode,
-    };
+  getModeSelector(): null {
+    return null;
   },
 
-  applyModeSelection(value: string, settings: unknown): void {
+  getPermissionModeToggle(): ProviderPermissionModeToggleConfig {
+    return OPENCODE_PERMISSION_MODE_TOGGLE;
+  },
+
+  resolvePermissionMode(settings: Record<string, unknown>): string | null {
+    const selectedMode = getOpencodeProviderSettings(settings).selectedMode;
+    return resolvePermissionModeForManagedOpencodeMode(selectedMode);
+  },
+
+  applyPermissionMode(value: string, settings: unknown): void {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
       return;
     }
 
-    updateOpencodeProviderSettings(settings as Record<string, unknown>, {
-      selectedMode: value,
+    const settingsBag = settings as Record<string, unknown>;
+    settingsBag.permissionMode = value;
+    updateOpencodeProviderSettings(settingsBag, {
+      selectedMode: resolveOpencodeModeForPermissionMode(
+        value,
+        getOpencodeProviderSettings(settingsBag).availableModes,
+      ),
     });
   },
 
@@ -265,15 +271,6 @@ function getDefaultThinkingLevelForModel(
   }
 
   return OPENCODE_DEFAULT_THINKING_LEVEL;
-}
-
-function formatOpencodeModeLabel(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '';
-  }
-
-  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
 function pushOption(
