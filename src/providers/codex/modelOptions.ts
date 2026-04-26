@@ -1,3 +1,7 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
 import { getRuntimeEnvironmentVariables } from '../../core/providers/providerEnvironment';
 import type { ProviderUIOption } from '../../core/providers/types';
 import { getCodexProviderSettings } from './settings';
@@ -43,9 +47,56 @@ export function parseConfiguredCustomModelIds(value: string): string[] {
   return modelIds;
 }
 
+export function readCodexConfiguredModelOptions(): ProviderUIOption[] {
+  try {
+    const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+    if (!fs.existsSync(configPath)) {
+      return [];
+    }
+
+    const content = fs.readFileSync(configPath, 'utf8');
+    const models: ProviderUIOption[] = [];
+    const seen = new Set<string>();
+    for (const match of content.matchAll(/^(?:model|review_model)\s*=\s*"([^"]+)"/gm)) {
+      const value = match[1]?.trim() ?? '';
+      if (!value || seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      models.push({
+        value,
+        label: formatCodexModelLabel(value),
+        description: 'Configured in ~/.codex/config.toml',
+      });
+    }
+
+    return models;
+  } catch {
+    return [];
+  }
+}
+
+function mergeUniqueModelOptions(...lists: ProviderUIOption[][]): ProviderUIOption[] {
+  const seen = new Set<string>();
+  const merged: ProviderUIOption[] = [];
+
+  for (const list of lists) {
+    for (const model of list) {
+      if (!model?.value?.trim() || seen.has(model.value)) {
+        continue;
+      }
+      seen.add(model.value);
+      merged.push(model);
+    }
+  }
+
+  return merged;
+}
+
 export function getCodexModelOptions(settings: Record<string, unknown>): ProviderUIOption[] {
   const models = [...DEFAULT_CODEX_MODELS];
   const seenValues = new Set(models.map(model => model.value));
+  const configuredModels = readCodexConfiguredModelOptions();
 
   const envModel = getConfiguredEnvCustomModel(settings);
   if (envModel) {
@@ -63,7 +114,7 @@ export function getCodexModelOptions(settings: Record<string, unknown>): Provide
     models.push(createCustomCodexModelOption(modelId, 'Custom model'));
   }
 
-  return models;
+  return mergeUniqueModelOptions(configuredModels, models);
 }
 
 export function resolveCodexModelSelection(
@@ -73,6 +124,11 @@ export function resolveCodexModelSelection(
   const envModel = getConfiguredEnvModel(settings);
   if (envModel) {
     return envModel;
+  }
+
+  const configuredModels = readCodexConfiguredModelOptions();
+  if (configuredModels.length > 0) {
+    return configuredModels[0].value;
   }
 
   const modelOptions = getCodexModelOptions(settings);

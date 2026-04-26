@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { Setting } from 'obsidian';
+import { Notice, Setting } from 'obsidian';
 
 import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
@@ -8,7 +8,12 @@ import { t } from '../../../i18n/i18n';
 import { getHostnameKey } from '../../../utils/env';
 import { expandHomePath } from '../../../utils/path';
 import { getCodexWorkspaceServices } from '../app/CodexWorkspaceServices';
-import { parseConfiguredCustomModelIds, resolveCodexModelSelection } from '../modelOptions';
+import {
+  getCodexModelOptions,
+  parseConfiguredCustomModelIds,
+  readCodexConfiguredModelOptions,
+  resolveCodexModelSelection,
+} from '../modelOptions';
 import { isWindowsStyleCliReference } from '../runtime/CodexBinaryLocator';
 import { getCodexProviderSettings, updateCodexProviderSettings } from '../settings';
 import { DEFAULT_CODEX_PRIMARY_MODEL } from '../types/models';
@@ -369,6 +374,48 @@ export const codexSettingsTabRenderer: ProviderSettingsTabRenderer = {
           await context.plugin.saveSettings();
         });
       });
+
+    const summarizeModels = (models: { value: string }[]): string => {
+      if (models.length === 0) {
+        return 'No models detected.';
+      }
+      const values = models.map((model) => model.value);
+      return values.length > 3
+        ? `${values.slice(0, 3).join(', ')} +${values.length - 3} more`
+        : values.join(', ');
+    };
+
+    const codexDetectedSetting = new Setting(container)
+      .setName('Current environment models')
+      .setDesc('Read models from ~/.codex/config.toml and current Codex environment, then refresh the picker.')
+      .addButton((button) => button.setButtonText('Refresh now').onClick(async () => {
+        button.setDisabled(true);
+        try {
+          const configuredModels = readCodexConfiguredModelOptions();
+          const mergedModels = getCodexModelOptions(settingsBag);
+          if (mergedModels.length === 0) {
+            codexDetectedStatus.setText('No models detected from current Codex environment.');
+            new Notice('No Codex models detected in the current environment.');
+            return;
+          }
+
+          settingsBag.savedProviderModel = {
+            ...(settingsBag.savedProviderModel as Record<string, unknown> | undefined),
+            codex: configuredModels[0]?.value ?? mergedModels[0].value,
+          };
+          if (settingsBag.settingsProvider === 'codex') {
+            settingsBag.model = configuredModels[0]?.value ?? mergedModels[0].value;
+          }
+          await context.plugin.saveSettings();
+          context.refreshModelSelectors();
+          codexDetectedStatus.setText(`Detected ${mergedModels.length} model(s): ${summarizeModels(mergedModels)}`);
+          new Notice(`Codex models refreshed: ${mergedModels.length} detected.`);
+        } finally {
+          button.setDisabled(false);
+        }
+      }));
+    const codexDetectedStatus = codexDetectedSetting.descEl.createDiv({ cls: 'claudian-sp-settings-desc' });
+    codexDetectedStatus.setText(`Detected now: ${summarizeModels(getCodexModelOptions(settingsBag))}`);
 
     // --- Skills ---
 

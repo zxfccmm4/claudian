@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { Setting } from 'obsidian';
+import { Notice, Setting } from 'obsidian';
 
 import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
@@ -9,7 +9,12 @@ import { t } from '../../../i18n/i18n';
 import { getHostnameKey } from '../../../utils/env';
 import { expandHomePath } from '../../../utils/path';
 import { getClaudeWorkspaceServices } from '../app/ClaudeWorkspaceServices';
-import { resolveClaudeModelSelection } from '../modelOptions';
+import {
+  getClaudeModelOptions,
+  mergeUniqueModelLists,
+  readClaudeConfiguredModelOptions,
+  resolveClaudeModelSelection,
+} from '../modelOptions';
 import { getClaudeProviderSettings, updateClaudeProviderSettings } from '../settings';
 import { AgentSettings } from './AgentSettings';
 import { claudeChatUIConfig } from './ClaudeChatUIConfig';
@@ -253,6 +258,50 @@ export const claudeSettingsTabRenderer: ProviderSettingsTabRenderer = {
           void commitCustomModels();
         });
       });
+
+    const summarizeModels = (models: { value: string }[]): string => {
+      if (models.length === 0) {
+        return 'No models detected.';
+      }
+      const values = models.map((model) => model.value);
+      return values.length > 3
+        ? `${values.slice(0, 3).join(', ')} +${values.length - 3} more`
+        : values.join(', ');
+    };
+
+    const claudeDetectedSetting = new Setting(container)
+      .setName('Current environment models')
+      .setDesc('Read models from ~/.claude/settings.json and current Claude environment, then merge them into the custom model list.')
+      .addButton((button) => button.setButtonText('Sync now').onClick(async () => {
+        button.setDisabled(true);
+        try {
+          const mergedModels = getClaudeModelOptions(settingsBag);
+          if (mergedModels.length === 0) {
+            claudeDetectedStatus.setText('No models detected from current Claude environment.');
+            new Notice('No Claude models detected in the current environment.');
+            return;
+          }
+
+          updateClaudeProviderSettings(settingsBag, {
+            customModels: mergedModels.map((model) => model.value).join('\n'),
+          });
+          reconcileActiveClaudeModelSelection();
+          ProviderSettingsCoordinator.reconcileTitleGenerationModelSelection(settingsBag);
+          await context.plugin.saveSettings();
+          context.refreshModelSelectors();
+          claudeDetectedStatus.setText(`Detected ${mergedModels.length} model(s): ${summarizeModels(mergedModels)}`);
+          new Notice(`Claude models synced: ${mergedModels.length} detected.`);
+        } finally {
+          button.setDisabled(false);
+        }
+      }));
+    const claudeDetectedStatus = claudeDetectedSetting.descEl.createDiv({ cls: 'claudian-sp-settings-desc' });
+    claudeDetectedStatus.setText(
+      `Detected now: ${summarizeModels(mergeUniqueModelLists(
+        readClaudeConfiguredModelOptions(settingsBag),
+        getClaudeModelOptions(settingsBag),
+      ))}`,
+    );
 
     // --- Slash Commands ---
 
