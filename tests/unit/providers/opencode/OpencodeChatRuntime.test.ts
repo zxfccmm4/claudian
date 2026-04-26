@@ -1,5 +1,6 @@
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
+import * as opencodeWorkspace from '@/providers/opencode/app/OpencodeWorkspaceServices';
 import {
   OPENCODE_BUILD_MODE_ID,
   OPENCODE_SAFE_MODE_ID,
@@ -67,6 +68,72 @@ describe('OpencodeChatRuntime', () => {
         source: 'sdk',
       },
     ]);
+  });
+
+  it('combines MCP mentions from text and toolbar selections when preparing turns', () => {
+    jest.spyOn(opencodeWorkspace, 'maybeGetOpencodeWorkspaceServices').mockReturnValue({
+      mcpManager: {
+        extractMentions: jest.fn().mockReturnValue(new Set(['alpha'])),
+      },
+    } as any);
+
+    const runtime = new OpencodeChatRuntime(createMockPlugin());
+    const turn = runtime.prepareTurn({
+      enabledMcpServers: new Set(['bravo']),
+      text: 'Use @alpha and @bravo',
+    });
+
+    expect(turn.mcpMentions).toEqual(new Set(['alpha', 'bravo']));
+  });
+
+  it('translates active OpenCode MCP servers into ACP session config entries', async () => {
+    const loadServers = jest.fn().mockResolvedValue(undefined);
+    const getActiveServers = jest.fn().mockReturnValue({
+      alpha: {
+        args: ['server.js', '--port', '3000'],
+        command: 'node',
+      },
+      bravo: {
+        headers: {
+          Authorization: 'Bearer token',
+        },
+        type: 'sse',
+        url: 'https://example.com/sse',
+      },
+    });
+
+    jest.spyOn(opencodeWorkspace, 'maybeGetOpencodeWorkspaceServices').mockReturnValue({
+      mcpManager: {
+        extractMentions: jest.fn().mockReturnValue(new Set(['alpha'])),
+        getActiveServers,
+        loadServers,
+      },
+    } as any);
+
+    const runtime = new OpencodeChatRuntime(createMockPlugin());
+    const turn = runtime.prepareTurn({
+      enabledMcpServers: new Set(['bravo']),
+      text: 'Use @alpha and bravo',
+    });
+
+    await expect((runtime as any).resolveActiveMcpServers(turn)).resolves.toEqual([
+      {
+        args: ['server.js', '--port', '3000'],
+        command: 'node',
+        name: 'alpha',
+        type: 'stdio',
+      },
+      {
+        headers: [
+          { name: 'Authorization', value: 'Bearer token' },
+        ],
+        name: 'bravo',
+        type: 'sse',
+        url: 'https://example.com/sse',
+      },
+    ]);
+    expect(loadServers).toHaveBeenCalledTimes(1);
+    expect(getActiveServers).toHaveBeenCalledWith(new Set(['alpha', 'bravo']));
   });
 
   it('does not create a session when commands are requested before a session exists', async () => {

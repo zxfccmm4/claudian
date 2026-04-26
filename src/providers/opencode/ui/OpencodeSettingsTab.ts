@@ -1,20 +1,23 @@
 import * as fs from 'fs';
-import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
-import * as path from 'node:path';
 import { Notice, Setting } from 'obsidian';
 
 import type { ProviderCommandCatalog } from '../../../core/providers/commands/ProviderCommandCatalog';
 import type { ProviderCommandEntry } from '../../../core/providers/commands/ProviderCommandEntry';
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
 import type { McpServerConfig } from '../../../core/types/mcp';
-import { getMcpServerType, isValidMcpServerConfig } from '../../../core/types/mcp';
+import { getMcpServerType } from '../../../core/types/mcp';
 import { renderEnvironmentSettingsSection } from '../../../features/settings/ui/EnvironmentSettingsSection';
 import { getHostnameKey } from '../../../utils/env';
 import { expandHomePath, getVaultPath } from '../../../utils/path';
 import { maybeGetOpencodeWorkspaceServices } from '../app/OpencodeWorkspaceServices';
 import { clearOpencodeDiscoveryState } from '../discoveryState';
 import { sameStringList } from '../internal/compareCollections';
+import {
+  type OpencodeConfiguredMcpOverview,
+  type OpencodeConfiguredMcpServer,
+  loadOpencodeConfiguredMcpOverview,
+} from '../mcp/configuredMcp';
 import {
   buildOpencodeBaseModels,
   type OpencodeDiscoveredModel,
@@ -27,7 +30,6 @@ import {
   type OpencodeProviderSettings,
   updateOpencodeProviderSettings,
 } from '../settings';
-import { buildOpencodeRuntimeEnv } from '../runtime/OpencodeRuntimeEnvironment';
 import { OpencodeAgentSettings } from './OpencodeAgentSettings';
 
 const ALL_PROVIDERS_KEY = 'all';
@@ -39,18 +41,6 @@ interface EnrichedModel {
   providerKey: string;
   providerLabel: string;
   rawId: string;
-}
-
-interface ConfiguredOpencodeMcpServer {
-  config: McpServerConfig;
-  name: string;
-  sourcePath: string;
-}
-
-interface ConfiguredOpencodeMcpOverview {
-  loadedPaths: string[];
-  searchedPaths: string[];
-  servers: ConfiguredOpencodeMcpServer[];
 }
 
 export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
@@ -893,7 +883,7 @@ function renderOpencodeCommandOverviewEntry(
 
 function renderOpencodeMcpOverviewEntry(
   listEl: HTMLElement,
-  server: ConfiguredOpencodeMcpServer,
+  server: OpencodeConfiguredMcpServer,
 ): void {
   const itemEl = listEl.createDiv({ cls: 'claudian-sp-item' });
   const infoEl = itemEl.createDiv({ cls: 'claudian-sp-info' });
@@ -920,161 +910,8 @@ function renderOpencodeMcpOverviewEntry(
 async function readConfiguredOpencodeMcpOverview(
   settings: Record<string, unknown>,
   vaultPath: string | null,
-): Promise<ConfiguredOpencodeMcpOverview> {
-  const env = resolveOpencodeOverviewEnv(settings);
-  const searchedPaths = resolveOpencodeConfigCandidates(env, vaultPath);
-  const loadedPaths: string[] = [];
-  const servers: ConfiguredOpencodeMcpServer[] = [];
-  const seenNames = new Set<string>();
-
-  for (const candidatePath of searchedPaths) {
-    if (!candidatePath || !fs.existsSync(candidatePath)) {
-      continue;
-    }
-
-    try {
-      const rawConfig = await fsp.readFile(candidatePath, 'utf8');
-      const parsedServers = extractConfiguredMcpServers(rawConfig, candidatePath);
-      if (parsedServers.length === 0) {
-        loadedPaths.push(candidatePath);
-        continue;
-      }
-
-      loadedPaths.push(candidatePath);
-      for (const server of parsedServers) {
-        const key = server.name.toLowerCase();
-        if (seenNames.has(key)) {
-          continue;
-        }
-
-        seenNames.add(key);
-        servers.push(server);
-      }
-    } catch {
-      // Ignore unreadable config files; the settings view is best-effort only.
-    }
-  }
-
-  servers.sort((left, right) => left.name.localeCompare(right.name));
-  return { loadedPaths, searchedPaths, servers };
-}
-
-function resolveOpencodeOverviewEnv(
-  settings: Record<string, unknown>,
-): NodeJS.ProcessEnv {
-  const env = buildOpencodeRuntimeEnv(settings, '');
-  const home = env.HOME?.trim() || os.homedir();
-  const xdgConfigHome = env.XDG_CONFIG_HOME?.trim() || path.join(home, '.config');
-  return {
-    ...env,
-    HOME: home,
-    OPENCODE_CONFIG_DIR: env.OPENCODE_CONFIG_DIR?.trim() || path.join(xdgConfigHome, 'opencode'),
-    XDG_CONFIG_HOME: xdgConfigHome,
-  };
-}
-
-function resolveOpencodeConfigCandidates(
-  env: NodeJS.ProcessEnv,
-  vaultPath: string | null,
-): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const home = env.HOME?.trim() || os.homedir();
-  const projectConfigDisabled = isTruthyEnvValue(env.OPENCODE_DISABLE_PROJECT_CONFIG);
-  const configuredConfig = env.OPENCODE_CONFIG?.trim();
-  const configDir = env.OPENCODE_CONFIG_DIR?.trim()
-    || path.join(env.XDG_CONFIG_HOME?.trim() || path.join(home, '.config'), 'opencode');
-
-  const pushCandidate = (candidate: string | null | undefined): void => {
-    const normalized = candidate?.trim();
-    if (!normalized || seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
-
-  pushCandidate(resolveConfiguredConfigPath(configuredConfig, vaultPath));
-
-  if (!projectConfigDisabled && vaultPath) {
-    pushCandidate(path.join(vaultPath, '.opencode', 'opencode.json'));
-    pushCandidate(path.join(vaultPath, '.opencode', 'config.json'));
-  }
-
-  pushCandidate(path.join(configDir, 'opencode.json'));
-  pushCandidate(path.join(configDir, 'config.json'));
-
-  if (process.platform === 'darwin') {
-    const appSupportDir = path.join(home, 'Library', 'Application Support', 'opencode');
-    pushCandidate(path.join(appSupportDir, 'opencode.json'));
-    pushCandidate(path.join(appSupportDir, 'config.json'));
-  }
-
-  return candidates;
-}
-
-function resolveConfiguredConfigPath(
-  configuredPath: string | undefined,
-  vaultPath: string | null,
-): string | null {
-  const trimmed = configuredPath?.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const expanded = expandHomePath(trimmed);
-  if (path.isAbsolute(expanded)) {
-    return expanded;
-  }
-
-  return vaultPath ? path.resolve(vaultPath, expanded) : path.resolve(expanded);
-}
-
-function extractConfiguredMcpServers(
-  rawConfig: string,
-  sourcePath: string,
-): ConfiguredOpencodeMcpServer[] {
-  const parsed = JSON.parse(rawConfig) as unknown;
-  if (!isPlainObject(parsed)) {
-    return [];
-  }
-
-  const serverMaps = [
-    extractNamedMcpServerConfigs(parsed.mcpServers),
-    extractNamedMcpServerConfigs(parsed.mcp),
-    extractNamedMcpServerConfigs(
-      isPlainObject(parsed.mcp) ? parsed.mcp.servers : undefined,
-    ),
-  ];
-
-  const servers = serverMaps.find((entries) => entries.length > 0) ?? [];
-  return servers.map(({ name, config }) => ({
-    config,
-    name,
-    sourcePath,
-  }));
-}
-
-function extractNamedMcpServerConfigs(
-  value: unknown,
-): Array<{ name: string; config: McpServerConfig }> {
-  if (!isPlainObject(value)) {
-    return [];
-  }
-
-  const servers: Array<{ name: string; config: McpServerConfig }> = [];
-  for (const [name, config] of Object.entries(value)) {
-    if (!name.trim() || !isValidMcpServerConfig(config)) {
-      continue;
-    }
-
-    servers.push({
-      name: name.trim(),
-      config,
-    });
-  }
-
-  return servers;
+): Promise<OpencodeConfiguredMcpOverview> {
+  return loadOpencodeConfiguredMcpOverview(settings, vaultPath);
 }
 
 function describeMcpServerTarget(config: McpServerConfig): string {
@@ -1091,17 +928,4 @@ function shortenDisplayPath(fullPath: string): string {
   return fullPath.startsWith(home)
     ? `~${fullPath.slice(home.length)}`
     : fullPath;
-}
-
-function isPlainObject(value: unknown): value is Record<string, any> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isTruthyEnvValue(value: string | undefined): boolean {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-
-  return normalized !== '0' && normalized !== 'false' && normalized !== 'no';
 }

@@ -39,6 +39,7 @@ import type ClaudianPlugin from '../../../main';
 import { getEnhancedPath } from '../../../utils/env';
 import { getVaultPath } from '../../../utils/path';
 import {
+  type AcpMcpServer,
   AcpClientConnection,
   AcpJsonRpcTransport,
   type AcpReadTextFileRequest,
@@ -57,6 +58,7 @@ import {
   extractAcpSessionModelState,
   extractAcpSessionModeState,
 } from '../../acp';
+import { maybeGetOpencodeWorkspaceServices } from '../app/OpencodeWorkspaceServices';
 import { OPENCODE_PROVIDER_CAPABILITIES } from '../capabilities';
 import { updateOpencodeDiscoveryState } from '../discoveryState';
 import {
@@ -145,6 +147,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
   private contextUsage: AcpUsageUpdate | null = null;
   private currentDatabasePath: string | null = null;
   private currentLaunchKey: string | null = null;
+  private currentSessionMcpKey: string | null = null;
   private currentSessionModelId: string | null = null;
   private currentSessionModeId: string | null = null;
   private currentTurnMetadata: ChatTurnMetadata = {};
@@ -172,11 +175,14 @@ export class OpencodeChatRuntime implements ChatRuntime {
   }
 
   prepareTurn(request: ChatTurnRequest): PreparedChatTurn {
+    const prompt = buildOpencodePromptText(request);
+    const mentionedMcpServers = this.getMcpManager()?.extractMentions(prompt) ?? new Set<string>();
+    const enabledMcpServers = request.enabledMcpServers ?? new Set<string>();
     return {
       isCompact: false,
-      mcpMentions: request.enabledMcpServers ?? new Set(),
+      mcpMentions: new Set([...mentionedMcpServers, ...enabledMcpServers]),
       persistedContent: '',
-      prompt: buildOpencodePromptText(request),
+      prompt,
       request,
     };
   }
@@ -199,6 +205,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     const previousSessionId = this.sessionId;
     const nextSessionId = conversation?.sessionId ?? null;
     if (this.sessionId !== nextSessionId) {
+      this.currentSessionMcpKey = null;
       this.currentSessionModelId = null;
       this.currentSessionModeId = null;
       this.sessionInvalidated = false;
@@ -216,7 +223,10 @@ export class OpencodeChatRuntime implements ChatRuntime {
     }
   }
 
-  async reloadMcpServers(): Promise<void> {}
+  async reloadMcpServers(): Promise<void> {
+    await this.getMcpManager()?.loadServers();
+    this.currentSessionMcpKey = null;
+  }
 
   async ensureReady(options?: ChatRuntimeEnsureReadyOptions): Promise<boolean> {
     const settings = getOpencodeProviderSettings(this.plugin.settings as unknown as Record<string, unknown>);
@@ -298,7 +308,9 @@ export class OpencodeChatRuntime implements ChatRuntime {
     let shouldBootstrapHistory = previousMessages.length > 0
       && (!expectedSessionId || this.sessionInvalidated);
 
-    if (!(await this.ensureReady())) {
+    const activeMcpServers = await this.resolveActiveMcpServers(turn, queryOptions);
+
+    if (!(await this.ensureReady({ allowSessionCreation: false }))) {
       yield { type: 'error', content: 'Failed to start OpenCode. Check the CLI path and login state.' };
       yield { type: 'done' };
       return;
@@ -316,7 +328,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
     }
 
     if (!this.sessionId) {
-      const sessionId = await this.createSession(cwd);
+      const sessionId = await this.createSession(cwd, activeMcpServers);
       if (!sessionId) {
         yield { type: 'error', content: 'Failed to create an OpenCode session.' };
         yield { type: 'done' };
@@ -338,6 +350,7 @@ export class OpencodeChatRuntime implements ChatRuntime {
 
     const activeTurn = this.activeTurn;
     try {
+      await this.applySelectedMcpServers(sessionId, cwd, activeMcpServers);
       await this.applySelectedMode(sessionId);
       await this.applySelectedModel(sessionId, queryOptions);
     } catch (error) {
@@ -942,7 +955,10 @@ export class OpencodeChatRuntime implements ChatRuntime {
     }
   }
 
-  private async createSession(cwd: string): Promise<string | null> {
+  private async createSession(
+    cwd: string,
+    mcpServers: AcpMcpServer[] = [],
+  ): Promise<string | null> {
     if (!this.connection) {
       return null;
     }
@@ -951,8 +967,9 @@ export class OpencodeChatRuntime implements ChatRuntime {
       this.setSupportedCommands([]);
       const response = await this.connection.newSession({
         cwd,
-        mcpServers: [],
+        mcpServers,
       });
+      this.currentSessionMcpKey = this.serializeMcpServers(mcpServers);
       this.loadedSessionId = response.sessionId;
       this.sessionId = response.sessionId;
       this.sessionCwds.set(response.sessionId, cwd);
@@ -970,7 +987,11 @@ export class OpencodeChatRuntime implements ChatRuntime {
     }
   }
 
-  private async loadSession(sessionId: string, cwd: string): Promise<boolean> {
+  private async loadSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers: AcpMcpServer[] = [],
+  ): Promise<boolean> {
     if (!this.connection) {
       return false;
     }
@@ -979,10 +1000,11 @@ export class OpencodeChatRuntime implements ChatRuntime {
       this.setSupportedCommands([]);
       const response = await this.connection.loadSession({
         cwd,
-        mcpServers: [],
+        mcpServers,
         sessionId,
       });
       this.sessionInvalidated = false;
+      this.currentSessionMcpKey = this.serializeMcpServers(mcpServers);
       this.loadedSessionId = response.sessionId;
       this.sessionId = response.sessionId;
       this.sessionCwds.set(response.sessionId, cwd);
@@ -1184,10 +1206,100 @@ export class OpencodeChatRuntime implements ChatRuntime {
     this.currentDatabasePath = null;
     this.sessionId = null;
     this.loadedSessionId = null;
+    this.currentSessionMcpKey = null;
     this.currentSessionModelId = null;
     this.currentSessionModeId = null;
     this.setSupportedCommands([]);
   }
+
+  private getMcpManager() {
+    return maybeGetOpencodeWorkspaceServices()?.mcpManager ?? null;
+  }
+
+  private async resolveActiveMcpServers(
+    turn: PreparedChatTurn,
+    queryOptions?: ChatRuntimeQueryOptions,
+  ): Promise<AcpMcpServer[]> {
+    const mcpManager = this.getMcpManager();
+    if (!mcpManager) {
+      return [];
+    }
+
+    await mcpManager.loadServers();
+    const combinedMentions = new Set<string>([
+      ...turn.mcpMentions,
+      ...(queryOptions?.mcpMentions ?? new Set<string>()),
+      ...(turn.request.enabledMcpServers ?? new Set<string>()),
+      ...(queryOptions?.enabledMcpServers ?? new Set<string>()),
+    ]);
+    const activeServers = mcpManager.getActiveServers(combinedMentions);
+
+    return Object.entries(activeServers)
+      .map(([name, config]) => acpMcpServerFromConfig(name, config))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private async applySelectedMcpServers(
+    sessionId: string,
+    cwd: string,
+    mcpServers: AcpMcpServer[],
+  ): Promise<void> {
+    const nextKey = this.serializeMcpServers(mcpServers);
+    if (this.currentSessionMcpKey === nextKey) {
+      return;
+    }
+
+    const loaded = await this.loadSession(sessionId, cwd, mcpServers);
+    if (!loaded) {
+      throw new Error('Failed to refresh OpenCode MCP servers.');
+    }
+  }
+
+  private serializeMcpServers(mcpServers: AcpMcpServer[]): string {
+    return JSON.stringify(mcpServers);
+  }
+}
+
+function acpMcpServerFromConfig(
+  name: string,
+  config: {
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    type?: 'stdio' | 'sse' | 'http';
+    url?: string;
+    headers?: Record<string, string>;
+  },
+): AcpMcpServer {
+  if ('command' in config && typeof config.command === 'string') {
+    return {
+      args: config.args ?? [],
+      command: config.command,
+      ...(config.env
+        ? {
+          env: Object.entries(config.env).map(([envName, value]) => ({
+            name: envName,
+            value,
+          })),
+        }
+        : {}),
+      name,
+      type: 'stdio',
+    };
+  }
+
+  const headers = config.headers
+    ? Object.entries(config.headers).map(([headerName, value]) => ({
+      name: headerName,
+      value,
+    }))
+    : undefined;
+  return {
+    ...(headers ? { headers } : {}),
+    name,
+    type: config.type === 'sse' ? 'sse' : 'http',
+    url: config.url ?? '',
+  };
 }
 
 function normalizeApprovalInput(rawInput: unknown): Record<string, unknown> {

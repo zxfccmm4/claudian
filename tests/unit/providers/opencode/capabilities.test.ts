@@ -29,6 +29,10 @@ describe('OPENCODE_PROVIDER_CAPABILITIES', () => {
     expect(OPENCODE_PROVIDER_CAPABILITIES.supportsProviderCommands).toBe(true);
   });
 
+  it('should support MCP tools', () => {
+    expect(OPENCODE_PROVIDER_CAPABILITIES.supportsMcpTools).toBe(true);
+  });
+
   it('should use effort-based reasoning control', () => {
     expect(OPENCODE_PROVIDER_CAPABILITIES.reasoningControl).toBe('effort');
   });
