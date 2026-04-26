@@ -16,6 +16,7 @@ function mapSdkCommands(sdkCommands: SDKSlashCommand[]): SlashCommand[] {
     argumentHint: cmd.argumentHint,
     content: '',
     source: 'sdk' as const,
+    kind: (cmd as SDKSlashCommand & { kind?: SlashCommand['kind'] }).kind,
   }));
 }
 

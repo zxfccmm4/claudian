@@ -77,19 +77,31 @@ export class ClaudeCommandCatalog implements ProviderCommandCatalog {
 
   async listDropdownEntries(context: { includeBuiltIns: boolean }): Promise<ProviderCommandEntry[]> {
     void context;
-    // SDK commands already include vault commands/skills (the SDK scans
-    // .claude/commands/ and .claude/skills/ internally). No file scan needed.
-    // When the cache is empty (cold start, no active runtime), probe the SDK.
     if (this.sdkCommands.length === 0 && this.probe) {
       await this.ensureProbed();
     }
+
     const runtimeEntries = this.sdkCommands
       .filter(cmd => !BUILTIN_HIDDEN_COMMANDS.has(cmd.name.toLowerCase()))
       .map(slashCommandToEntry);
-    if (runtimeEntries.length > 0) {
-      return runtimeEntries;
+
+    const vaultEntries = await this.listVaultEntries();
+    if (runtimeEntries.length === 0) {
+      return vaultEntries;
     }
-    return this.listVaultEntries();
+
+    const seen = new Set(runtimeEntries.map((entry) => entry.name.toLowerCase()));
+    const merged = [...runtimeEntries];
+    for (const entry of vaultEntries) {
+      const key = entry.name.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(entry);
+    }
+
+    return merged;
   }
 
   /** Probe the SDK for commands. Deduplicates concurrent calls. */
