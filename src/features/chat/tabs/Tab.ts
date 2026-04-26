@@ -1589,6 +1589,8 @@ export async function destroyTab(tab: TabData): Promise<void> {
   tab.ui.fileContextManager?.destroy();
   tab.ui.slashCommandDropdown?.destroy();
   tab.ui.slashCommandDropdown = null;
+  tab.ui.modelSelector?.destroy();
+  tab.ui.modelSelector = null;
   tab.ui.instructionModeManager?.destroy();
   tab.ui.instructionModeManager = null;
   tab.ui.bangBashModeManager?.destroy();

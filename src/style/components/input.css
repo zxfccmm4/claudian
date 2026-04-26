@@ -79,13 +79,15 @@
   border: none !important;
   border-radius: 6px;
   background: transparent !important;
-  color: var(--text-normal);
+  color: var(--text-on-accent, var(--text-normal));
   font-family: inherit;
   font-size: 14px;
+  font-weight: 500;
   line-height: 1.4;
   box-shadow: none !important;
   overflow-y: auto;
   unicode-bidi: plaintext; /* Proper BiDi text handling for mixed RTL/LTR */
+  -webkit-text-fill-color: var(--text-on-accent, var(--text-normal));
 }
 
 .claudian-input:hover,
@@ -97,7 +99,8 @@
 }
 
 .claudian-input::placeholder {
-  color: var(--text-muted);
+  color: var(--text-faint);
+  opacity: 0.9;
 }
 
 /* Input toolbar */

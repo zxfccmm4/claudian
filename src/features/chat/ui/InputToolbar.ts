@@ -45,11 +45,32 @@ export class ModelSelector {
   private container: HTMLElement;
   private buttonEl: HTMLElement | null = null;
   private dropdownEl: HTMLElement | null = null;
+  private activeGroup: string | null = null;
+  private isOpen = false;
   private callbacks: ToolbarCallbacks;
+  private readonly onDocumentPointerDown = (event: PointerEvent): void => {
+    if (!this.isOpen) {
+      return;
+    }
+
+    const target = event.target;
+    if (target instanceof Node && this.container.contains(target)) {
+      return;
+    }
+
+    this.closeDropdown();
+  };
+
   constructor(parentEl: HTMLElement, callbacks: ToolbarCallbacks) {
     this.callbacks = callbacks;
     this.container = parentEl.createDiv({ cls: 'claudian-model-selector' });
+    document.addEventListener('pointerdown', this.onDocumentPointerDown, true);
     this.render();
+  }
+
+  destroy(): void {
+    document.removeEventListener('pointerdown', this.onDocumentPointerDown, true);
+    this.closeDropdown();
   }
 
   private getAvailableModels() {
@@ -65,10 +86,17 @@ export class ModelSelector {
     this.container.empty();
 
     this.buttonEl = this.container.createDiv({ cls: 'claudian-model-btn' });
+    this.buttonEl.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.isOpen = !this.isOpen;
+      this.syncDropdownState();
+    });
     this.updateDisplay();
 
     this.dropdownEl = this.container.createDiv({ cls: 'claudian-model-dropdown' });
     this.renderOptions();
+    this.syncDropdownState();
   }
 
   updateDisplay() {
@@ -83,6 +111,9 @@ export class ModelSelector {
 
     const labelEl = this.buttonEl.createSpan({ cls: 'claudian-model-label' });
     labelEl.setText(displayModel?.label || 'Unknown');
+    const chevronEl = this.buttonEl.createSpan({ cls: 'claudian-model-chevron' });
+    chevronEl.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+    this.buttonEl.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
   }
 
   renderOptions() {
@@ -91,17 +122,60 @@ export class ModelSelector {
 
     const currentModel = this.callbacks.getSettings().model;
     const models = this.getAvailableModels();
-    const reversed = [...models].reverse();
+    const groups = new Map<string, ProviderUIOption[]>();
+    const groupOrder: string[] = [];
 
-    let lastGroup: string | undefined;
-    for (const model of reversed) {
-      if (model.group && model.group !== lastGroup) {
-        const separator = this.dropdownEl.createDiv({ cls: 'claudian-model-group' });
-        separator.setText(model.group);
-        lastGroup = model.group;
+    for (const model of models) {
+      const groupName = model.group || 'Other';
+      if (!groups.has(groupName)) {
+        groups.set(groupName, []);
+        groupOrder.push(groupName);
       }
+      groups.get(groupName)!.push(model);
+    }
 
-      const option = this.dropdownEl.createDiv({ cls: 'claudian-model-option' });
+    const selectedModel = models.find((model) => model.value === currentModel);
+    const preferredGroup = selectedModel?.group || groupOrder[0] || 'Other';
+    if (!this.activeGroup || !groups.has(this.activeGroup)) {
+      this.activeGroup = preferredGroup;
+    }
+
+    if (groupOrder.length > 1) {
+      const providerId = this.callbacks.getCapabilities().providerId;
+      const tabsEl = this.dropdownEl.createDiv({ cls: 'claudian-model-tabs' });
+      for (const groupName of groupOrder) {
+        const tabEl = tabsEl.createDiv({ cls: 'claudian-model-tab' });
+        if (groupName === this.activeGroup) {
+          tabEl.addClass('selected');
+        }
+
+        const firstModel = groups.get(groupName)?.[0];
+        const groupIcon = firstModel?.providerIcon ?? this.callbacks.getUIConfig().getProviderIcon?.();
+        const showTabIcon = providerId !== 'opencode';
+        if (showTabIcon && groupIcon) {
+          tabEl.appendChild(createProviderIconSvg(groupIcon, {
+            className: 'claudian-model-provider-icon',
+            height: 12,
+            width: 12,
+          }));
+        }
+
+        tabEl.createSpan({ text: groupName });
+        tabEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.activeGroup = groupName;
+          this.isOpen = true;
+          this.renderOptions();
+          this.syncDropdownState();
+        });
+      }
+    }
+
+    const panelEl = this.dropdownEl.createDiv({ cls: 'claudian-model-options-panel' });
+    const activeModels = groups.get(this.activeGroup) || models;
+
+    for (const model of activeModels) {
+      const option = panelEl.createDiv({ cls: 'claudian-model-option' });
       if (model.value === currentModel) {
         option.addClass('selected');
       }
@@ -114,7 +188,13 @@ export class ModelSelector {
           width: 12,
         }));
       }
-      option.createSpan({ text: model.label });
+
+      const textWrap = option.createDiv({ cls: 'claudian-model-option-content' });
+      textWrap.createSpan({ cls: 'claudian-model-option-label', text: model.label });
+      if (model.description) {
+        textWrap.createSpan({ cls: 'claudian-model-option-description', text: model.description });
+      }
+
       if (model.description) {
         option.setAttribute('title', model.description);
       }
@@ -122,10 +202,28 @@ export class ModelSelector {
       option.addEventListener('click', async (e) => {
         e.stopPropagation();
         await this.callbacks.onModelChange(model.value);
+        this.activeGroup = model.group || this.activeGroup;
+        this.isOpen = false;
         this.updateDisplay();
         this.renderOptions();
+        this.syncDropdownState();
       });
     }
+  }
+
+  private syncDropdownState(): void {
+    if (!this.dropdownEl || !this.buttonEl) {
+      return;
+    }
+
+    this.dropdownEl.toggleClass('is-open', this.isOpen);
+    this.buttonEl.toggleClass('is-open', this.isOpen);
+    this.buttonEl.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
+  }
+
+  private closeDropdown(): void {
+    this.isOpen = false;
+    this.syncDropdownState();
   }
 }
 

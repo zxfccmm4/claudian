@@ -1,6 +1,7 @@
 import * as fs from 'fs';
-import { Setting } from 'obsidian';
+import { Notice, Setting } from 'obsidian';
 
+import type { ProviderCommandCatalog } from '../../../core/providers/commands/ProviderCommandCatalog';
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
 import { renderEnvironmentSettingsSection } from '../../../features/settings/ui/EnvironmentSettingsSection';
 import { getHostnameKey } from '../../../utils/env';
@@ -17,6 +18,7 @@ import {
   getOpencodeProviderSettings,
   normalizeOpencodeVisibleModels,
   OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
+  type OpencodeProviderSettings,
   updateOpencodeProviderSettings,
 } from '../settings';
 import { OpencodeAgentSettings } from './OpencodeAgentSettings';
@@ -158,6 +160,52 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
       updateCliPathValidation(currentValue, text.inputEl);
     });
+
+    const environmentSetting = new Setting(container)
+      .setName('Current environment models')
+      .setDesc('Start a short-lived OpenCode ACP session to refresh detected models, modes, and runtime slash commands from the current environment.')
+      .addButton((button) => button.setButtonText('Sync now').onClick(async () => {
+        const loader = opencodeWorkspace?.runtimeCommandLoader;
+        const catalog = opencodeWorkspace?.commandCatalog;
+        if (!loader || !catalog) {
+          new Notice('OpenCode runtime discovery is not available.');
+          return;
+        }
+
+        button.setDisabled(true);
+        try {
+          const commands = await loader.loadCommands({
+            allowSessionCreation: true,
+            conversation: null,
+            externalContextPaths: [],
+            plugin: context.plugin,
+            runtime: null,
+          });
+          catalog.setRuntimeCommands(commands);
+
+          const latest = getOpencodeProviderSettings(settingsBag);
+          renderAll();
+          context.refreshModelSelectors();
+          for (const view of context.plugin.getAllViews()) {
+            view.invalidateProviderCommandCaches?.(['opencode']);
+          }
+
+          const summary = buildEnvironmentDiscoverySummary(
+            latest,
+            commands.map((command) => command.kind === 'skill' ? 'skill' : 'command'),
+          );
+          environmentStatus.setText(`Detected now: ${summary}`);
+          new Notice(`OpenCode refreshed: ${summary}`);
+        } finally {
+          button.setDisabled(false);
+        }
+      }));
+    const environmentStatus = environmentSetting.descEl.createDiv({ cls: 'claudian-sp-settings-desc' });
+    void refreshEnvironmentStatus(
+      environmentStatus,
+      getOpencodeProviderSettings(settingsBag),
+      opencodeWorkspace?.commandCatalog,
+    );
 
     new Setting(container).setName('Models').setHeading();
 
@@ -601,4 +649,42 @@ function buildEnrichedModels(
     }
     return left.modelLabel.localeCompare(right.modelLabel);
   });
+}
+
+async function refreshEnvironmentStatus(
+  target: HTMLElement,
+  settings: OpencodeProviderSettings,
+  catalog: ProviderCommandCatalog | null | undefined,
+): Promise<void> {
+  const runtimeEntries = catalog
+    ? await catalog.listDropdownEntries({ includeBuiltIns: true })
+    : [];
+  const commandKinds = runtimeEntries.map((entry) => entry.kind);
+  target.setText(`Detected now: ${buildEnvironmentDiscoverySummary(settings, commandKinds)}`);
+}
+
+function buildEnvironmentDiscoverySummary(
+  settings: OpencodeProviderSettings,
+  commandKinds: string[],
+): string {
+  if (settings.discoveredModels.length === 0 && commandKinds.length === 0) {
+    return 'No models or runtime commands detected yet.';
+  }
+
+  const enriched = buildEnrichedModels(settings.discoveredModels, settings.visibleModels);
+  const providerCount = new Set(enriched.map((model) => model.providerKey)).size;
+  const providerWord = providerCount === 1 ? 'provider' : 'providers';
+  const modeCount = settings.availableModes.length;
+  const modeWord = modeCount === 1 ? 'mode' : 'modes';
+  const skillCount = commandKinds.filter((kind) => kind === 'skill').length;
+  const commandCount = commandKinds.length - skillCount;
+  const skillWord = skillCount === 1 ? 'skill' : 'skills';
+  const commandWord = commandCount === 1 ? 'command' : 'commands';
+
+  return [
+    `${settings.discoveredModels.length} model(s) across ${providerCount} ${providerWord}`,
+    `${modeCount} ${modeWord}`,
+    `${commandCount} ${commandWord}`,
+    `${skillCount} ${skillWord}`,
+  ].join(' • ');
 }
