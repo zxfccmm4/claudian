@@ -949,6 +949,8 @@ export class McpServerSelector {
   private iconEl: HTMLElement | null = null;
   private badgeEl: HTMLElement | null = null;
   private dropdownEl: HTMLElement | null = null;
+  private summaryEl: HTMLElement | null = null;
+  private summaryTextEl: HTMLElement | null = null;
   private mcpManager: McpServerManager | null = null;
   private enabledServers: Set<string> = new Set();
   private onChangeCallback: ((enabled: Set<string>) => void) | null = null;
@@ -1039,6 +1041,10 @@ export class McpServerSelector {
 
     this.badgeEl = iconWrapper.createDiv({ cls: 'claudian-mcp-selector-badge' });
 
+    this.summaryEl = this.container.createDiv({ cls: 'claudian-mcp-selector-summary' });
+    this.summaryEl.createSpan({ cls: 'claudian-mcp-selector-summary-label', text: 'MCP' });
+    this.summaryTextEl = this.summaryEl.createSpan({ cls: 'claudian-mcp-selector-summary-text' });
+
     this.updateDisplay();
 
     this.dropdownEl = this.container.createDiv({ cls: 'claudian-mcp-selector-dropdown' });
@@ -1057,7 +1063,12 @@ export class McpServerSelector {
 
     // Header
     const headerEl = this.dropdownEl.createDiv({ cls: 'claudian-mcp-selector-header' });
-    headerEl.setText('MCP Servers');
+    const enabledNames = this.getEnabledServerNames();
+    headerEl.setText(
+      enabledNames.length > 0
+        ? `MCP Servers • ${enabledNames.length} active`
+        : 'MCP Servers',
+    );
 
     // Server list
     const listEl = this.dropdownEl.createDiv({ cls: 'claudian-mcp-selector-list' });
@@ -1137,9 +1148,10 @@ export class McpServerSelector {
 
   updateDisplay() {
     this.pruneEnabledServers();
-    if (!this.iconEl || !this.badgeEl) return;
+    if (!this.iconEl || !this.badgeEl || !this.summaryEl || !this.summaryTextEl) return;
 
-    const count = this.enabledServers.size;
+    const enabledNames = this.getEnabledServerNames();
+    const count = enabledNames.length;
     const hasServers = (this.mcpManager?.getServers().length || 0) > 0;
 
     // Show/hide container based on whether there are servers and visibility
@@ -1151,7 +1163,13 @@ export class McpServerSelector {
 
     if (count > 0) {
       this.iconEl.addClass('active');
-      this.iconEl.setAttribute('title', `${count} MCP server${count > 1 ? 's' : ''} enabled (click to manage)`);
+      this.iconEl.setAttribute(
+        'title',
+        `${count} MCP server${count > 1 ? 's' : ''} active: ${enabledNames.join(', ')}`,
+      );
+      this.summaryEl.style.display = 'inline-flex';
+      this.summaryEl.setAttribute('title', enabledNames.join(', '));
+      this.summaryTextEl.setText(this.formatEnabledSummary(enabledNames));
 
       // Show badge only when more than 1
       if (count > 1) {
@@ -1162,9 +1180,30 @@ export class McpServerSelector {
       }
     } else {
       this.iconEl.removeClass('active');
-      this.iconEl.setAttribute('title', 'MCP servers (click to enable)');
+      this.iconEl.setAttribute('title', 'MCP servers available (click to enable)');
       this.badgeEl.removeClass('visible');
+      this.summaryEl.style.display = 'none';
+      this.summaryEl.setAttribute('title', '');
+      this.summaryTextEl.setText('');
     }
+  }
+
+  private getEnabledServerNames(): string[] {
+    const orderedNames = this.mcpManager?.getServers()
+      .filter((server) => server.enabled && this.enabledServers.has(server.name))
+      .map((server) => server.name) ?? [];
+    if (orderedNames.length > 0) {
+      return orderedNames;
+    }
+    return Array.from(this.enabledServers).sort((left, right) => left.localeCompare(right));
+  }
+
+  private formatEnabledSummary(enabledNames: string[]): string {
+    if (enabledNames.length <= 2) {
+      return enabledNames.join(', ');
+    }
+
+    return `${enabledNames.slice(0, 2).join(', ')} +${enabledNames.length - 2}`;
   }
 }
 

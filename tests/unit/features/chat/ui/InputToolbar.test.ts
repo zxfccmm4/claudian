@@ -21,6 +21,13 @@ jest.mock('obsidian', () => ({
   setIcon: jest.fn(),
 }));
 
+beforeAll(() => {
+  (globalThis as { document?: unknown }).document = {
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+  };
+});
+
 function makeUsage(overrides: Partial<UsageInfo> = {}): UsageInfo {
   return {
     inputTokens: 0,
@@ -222,30 +229,30 @@ describe('ModelSelector', () => {
     expect(label?.textContent).toBe('Haiku');
   });
 
-  it('should render model options in reverse order', () => {
+  it('should render model options in configured order', () => {
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
     expect(dropdown).not.toBeNull();
-    // DEFAULT_CLAUDE_MODELS is [haiku, sonnet, opus] -> reversed is [opus, sonnet, haiku]
-    const options = dropdown?.children || [];
+    const panel = dropdown?.querySelector('.claudian-model-options-panel');
+    const options = panel?.children || [];
     expect(options.length).toBe(3);
-    // Text is in child span, check first child's textContent
-    expect(options[0]?.children[0]?.textContent).toBe('Opus');
-    expect(options[1]?.children[0]?.textContent).toBe('Sonnet');
-    expect(options[2]?.children[0]?.textContent).toBe('Haiku');
+    expect(options[0]?.querySelector('.claudian-model-option-label')?.textContent).toBe('Haiku');
+    expect(options[1]?.querySelector('.claudian-model-option-label')?.textContent).toBe('Sonnet');
+    expect(options[2]?.querySelector('.claudian-model-option-label')?.textContent).toBe('Opus');
   });
 
   it('should mark current model as selected', () => {
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
-    const options = dropdown?.children || [];
-    // Sonnet is current (index 1 in reversed order)
-    const sonnetOption = options.find((o: any) => o.children[0]?.textContent === 'Sonnet');
+    const panel = dropdown?.querySelector('.claudian-model-options-panel');
+    const options = panel?.children || [];
+    const sonnetOption = options.find((o: any) => o.querySelector('.claudian-model-option-label')?.textContent === 'Sonnet');
     expect(sonnetOption?.hasClass('selected')).toBe(true);
   });
 
   it('should call onModelChange when option clicked', async () => {
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
-    const options = dropdown?.children || [];
-    const opusOption = options.find((o: any) => o.children[0]?.textContent === 'Opus');
+    const panel = dropdown?.querySelector('.claudian-model-options-panel');
+    const options = panel?.children || [];
+    const opusOption = options.find((o: any) => o.querySelector('.claudian-model-option-label')?.textContent === 'Opus');
 
     await opusOption?.dispatchEvent('click', { stopPropagation: () => {} });
     expect(callbacks.onModelChange).toHaveBeenCalledWith('opus');
@@ -294,7 +301,7 @@ describe('ModelSelector', () => {
     expect(label?.textContent).toBe('Opus');
   });
 
-  it('should render group separators when models have group field', () => {
+  it('should render provider tabs when models have group field', () => {
     const groupedModels = [
       { value: 'opus', label: 'Opus', group: 'Claude' },
       { value: 'sonnet', label: 'Sonnet', group: 'Claude' },
@@ -314,21 +321,18 @@ describe('ModelSelector', () => {
     selector.renderOptions();
 
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
-    const children = dropdown?.children || [];
-    // Reversed: [Codex group, built-in Codex model, Claude group, Sonnet, Opus]
-    const groups = children.filter((c: any) => c.hasClass('claudian-model-group'));
-    expect(groups.length).toBe(2);
-    expect(groups[0]?.textContent).toBe('Codex');
-    expect(groups[1]?.textContent).toBe('Claude');
+    const tabs = dropdown?.querySelectorAll('.claudian-model-tab') || [];
+    expect(tabs.length).toBe(2);
+    expect(tabs[0]?.children.at(-1)?.textContent).toBe('Claude');
+    expect(tabs[1]?.children.at(-1)?.textContent).toBe('Codex');
   });
 
-  it('should not render group separators when models have no group field', () => {
+  it('should not render provider tabs when models have no group field', () => {
     selector.renderOptions();
 
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
-    const children = dropdown?.children || [];
-    const groups = children.filter((c: any) => c.hasClass('claudian-model-group'));
-    expect(groups.length).toBe(0);
+    const tabs = dropdown?.querySelectorAll('.claudian-model-tab') || [];
+    expect(tabs.length).toBe(0);
   });
 
   it('should show 1M variants instead of standard variants when enabled', () => {
@@ -345,11 +349,12 @@ describe('ModelSelector', () => {
     selector.updateDisplay();
 
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
-    const options = dropdown?.children || [];
-    expect(options.find((o: any) => o.children[0]?.textContent === 'Opus 1M')).toBeDefined();
-    expect(options.find((o: any) => o.children[0]?.textContent === 'Sonnet 1M')).toBeDefined();
-    expect(options.find((o: any) => o.children[0]?.textContent === 'Opus')).toBeUndefined();
-    expect(options.find((o: any) => o.children[0]?.textContent === 'Sonnet')).toBeUndefined();
+    const panel = dropdown?.querySelector('.claudian-model-options-panel');
+    const options = panel?.children || [];
+    expect(options.find((o: any) => o.querySelector('.claudian-model-option-label')?.textContent === 'Opus 1M')).toBeDefined();
+    expect(options.find((o: any) => o.querySelector('.claudian-model-option-label')?.textContent === 'Sonnet 1M')).toBeDefined();
+    expect(options.find((o: any) => o.querySelector('.claudian-model-option-label')?.textContent === 'Opus')).toBeUndefined();
+    expect(options.find((o: any) => o.querySelector('.claudian-model-option-label')?.textContent === 'Sonnet')).toBeUndefined();
     expect(parentEl.querySelector('.claudian-model-label')?.textContent).toBe('Opus 1M');
   });
 });
@@ -928,6 +933,33 @@ describe('McpServerSelector', () => {
     expect(icon?.hasClass('active')).toBe(true);
   });
 
+  it('should show an inline summary chip for enabled MCP servers', () => {
+    selector.setMcpManager(createMockMcpManager([
+      { name: 'apple-docs', enabled: true },
+      { name: 'context7', enabled: true },
+    ]));
+    selector.setEnabledServers(['apple-docs', 'context7']);
+    selector.updateDisplay();
+
+    const summary = parentEl.querySelector('.claudian-mcp-selector-summary');
+    const summaryText = parentEl.querySelector('.claudian-mcp-selector-summary-text');
+    expect(summary?.style.display).toBe('inline-flex');
+    expect(summaryText?.textContent).toBe('apple-docs, context7');
+  });
+
+  it('should collapse the inline summary when many MCP servers are enabled', () => {
+    selector.setMcpManager(createMockMcpManager([
+      { name: 'apple-docs', enabled: true },
+      { name: 'context7', enabled: true },
+      { name: 'zread', enabled: true },
+    ]));
+    selector.setEnabledServers(['apple-docs', 'context7', 'zread']);
+    selector.updateDisplay();
+
+    const summaryText = parentEl.querySelector('.claudian-mcp-selector-summary-text');
+    expect(summaryText?.textContent).toBe('apple-docs, context7 +1');
+  });
+
   it('should remove active class from icon when no servers enabled', () => {
     selector.setMcpManager(createMockMcpManager([{ name: 'server1', enabled: true }]));
     selector.clearEnabled();
@@ -935,6 +967,15 @@ describe('McpServerSelector', () => {
 
     const icon = parentEl.querySelector('.claudian-mcp-selector-icon');
     expect(icon?.hasClass('active')).toBe(false);
+  });
+
+  it('should hide the inline summary chip when no MCP servers are enabled', () => {
+    selector.setMcpManager(createMockMcpManager([{ name: 'server1', enabled: true }]));
+    selector.clearEnabled();
+    selector.updateDisplay();
+
+    const summary = parentEl.querySelector('.claudian-mcp-selector-summary');
+    expect(summary?.style.display).toBe('none');
   });
 
   it('should handle null mcpManager', () => {
