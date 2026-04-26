@@ -1,11 +1,17 @@
 import * as fs from 'fs';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Notice, Setting } from 'obsidian';
 
 import type { ProviderCommandCatalog } from '../../../core/providers/commands/ProviderCommandCatalog';
+import type { ProviderCommandEntry } from '../../../core/providers/commands/ProviderCommandEntry';
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
+import type { McpServerConfig } from '../../../core/types/mcp';
+import { getMcpServerType, isValidMcpServerConfig } from '../../../core/types/mcp';
 import { renderEnvironmentSettingsSection } from '../../../features/settings/ui/EnvironmentSettingsSection';
 import { getHostnameKey } from '../../../utils/env';
-import { expandHomePath } from '../../../utils/path';
+import { expandHomePath, getVaultPath } from '../../../utils/path';
 import { maybeGetOpencodeWorkspaceServices } from '../app/OpencodeWorkspaceServices';
 import { clearOpencodeDiscoveryState } from '../discoveryState';
 import { sameStringList } from '../internal/compareCollections';
@@ -21,6 +27,7 @@ import {
   type OpencodeProviderSettings,
   updateOpencodeProviderSettings,
 } from '../settings';
+import { buildOpencodeRuntimeEnv } from '../runtime/OpencodeRuntimeEnvironment';
 import { OpencodeAgentSettings } from './OpencodeAgentSettings';
 
 const ALL_PROVIDERS_KEY = 'all';
@@ -34,12 +41,29 @@ interface EnrichedModel {
   rawId: string;
 }
 
+interface ConfiguredOpencodeMcpServer {
+  config: McpServerConfig;
+  name: string;
+  sourcePath: string;
+}
+
+interface ConfiguredOpencodeMcpOverview {
+  loadedPaths: string[];
+  searchedPaths: string[];
+  servers: ConfiguredOpencodeMcpServer[];
+}
+
 export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
   render(container, context) {
     const opencodeWorkspace = maybeGetOpencodeWorkspaceServices();
     const settingsBag = context.plugin.settings as unknown as Record<string, unknown>;
     const opencodeSettings = getOpencodeProviderSettings(settingsBag);
     const hostnameKey = getHostnameKey();
+    const vaultPath = context.plugin.app ? getVaultPath(context.plugin.app) : null;
+    let commandOverviewSummaryEl: HTMLElement | null = null;
+    let commandOverviewBodyEl: HTMLElement | null = null;
+    let mcpOverviewSummaryEl: HTMLElement | null = null;
+    let mcpOverviewBodyEl: HTMLElement | null = null;
 
     new Setting(container).setName('Setup').setHeading();
 
@@ -161,6 +185,25 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
       updateCliPathValidation(currentValue, text.inputEl);
     });
 
+    const refreshOpenCodeOverviews = async (): Promise<void> => {
+      if (commandOverviewSummaryEl && commandOverviewBodyEl) {
+        await renderOpencodeCommandOverview(
+          commandOverviewSummaryEl,
+          commandOverviewBodyEl,
+          opencodeWorkspace?.commandCatalog,
+        );
+      }
+
+      if (mcpOverviewSummaryEl && mcpOverviewBodyEl) {
+        await renderOpencodeMcpOverview(
+          mcpOverviewSummaryEl,
+          mcpOverviewBodyEl,
+          settingsBag,
+          vaultPath,
+        );
+      }
+    };
+
     const environmentSetting = new Setting(container)
       .setName('Current environment models')
       .setDesc('Start a short-lived OpenCode ACP session to refresh detected models, modes, and runtime slash commands from the current environment.')
@@ -189,6 +232,7 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
           for (const view of context.plugin.getAllViews()) {
             view.invalidateProviderCommandCaches?.(['opencode']);
           }
+          await refreshOpenCodeOverviews();
 
           const summary = buildEnvironmentDiscoverySummary(
             latest,
@@ -565,11 +609,52 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
       text: 'OpenCode can auto-detect vault-level Claude slash commands from .claude/commands/ and skills from .claude/skills/, .codex/skills/, and .agents/skills/. Manage those entries in the Claude or Codex settings tab. This setting only hides entries from the OpenCode dropdown.',
     });
 
+    const commandsOverviewSection = container.createEl('details', {
+      cls: 'claudian-sp-advanced-section',
+    });
+    commandOverviewSummaryEl = commandsOverviewSection.createEl('summary', {
+      cls: 'claudian-sp-advanced-summary',
+      text: 'Detected runtime entries',
+    });
+    commandOverviewBodyEl = commandsOverviewSection.createDiv({
+      cls: 'claudian-opencode-overview',
+    });
+    void renderOpencodeCommandOverview(
+      commandOverviewSummaryEl,
+      commandOverviewBodyEl,
+      opencodeWorkspace?.commandCatalog,
+    );
+
     context.renderHiddenProviderCommandSetting(container, 'opencode', {
       name: 'Hidden Commands and Skills',
       desc: 'Hide specific OpenCode commands and skills from the dropdown. Enter names without the leading slash, one per line.',
       placeholder: 'compact\nreview\nfix',
     });
+
+    new Setting(container).setName('MCP Servers').setHeading();
+
+    const mcpDesc = container.createDiv({ cls: 'claudian-mcp-settings-desc' });
+    mcpDesc.createEl('p', {
+      cls: 'setting-item-description',
+      text: 'OpenCode reads MCP servers from its own config files. Claudian shows detected servers here for inspection, but does not edit or toggle them in-app yet.',
+    });
+
+    const mcpOverviewSection = container.createEl('details', {
+      cls: 'claudian-sp-advanced-section',
+    });
+    mcpOverviewSummaryEl = mcpOverviewSection.createEl('summary', {
+      cls: 'claudian-sp-advanced-summary',
+      text: 'Detected config servers',
+    });
+    mcpOverviewBodyEl = mcpOverviewSection.createDiv({
+      cls: 'claudian-opencode-overview',
+    });
+    void renderOpencodeMcpOverview(
+      mcpOverviewSummaryEl,
+      mcpOverviewBodyEl,
+      settingsBag,
+      vaultPath,
+    );
 
     if (opencodeWorkspace?.agentStorage) {
       new Setting(container).setName('Subagents').setHeading();
@@ -687,4 +772,336 @@ function buildEnvironmentDiscoverySummary(
     `${commandCount} ${commandWord}`,
     `${skillCount} ${skillWord}`,
   ].join(' • ');
+}
+
+async function renderOpencodeCommandOverview(
+  summaryEl: HTMLElement,
+  bodyEl: HTMLElement,
+  catalog: ProviderCommandCatalog | null | undefined,
+): Promise<void> {
+  bodyEl.empty();
+
+  const entries = catalog
+    ? await catalog.listDropdownEntries({ includeBuiltIns: true })
+    : [];
+  const skillCount = entries.filter((entry) => entry.kind === 'skill').length;
+  const commandCount = entries.length - skillCount;
+
+  summaryEl.setText(
+    entries.length > 0
+      ? `Detected runtime entries (${entries.length})`
+      : 'Detected runtime entries',
+  );
+
+  if (entries.length === 0) {
+    bodyEl.createDiv({
+      cls: 'claudian-opencode-overview-empty',
+      text: 'Run "Sync now" above or start an OpenCode chat session to populate runtime commands and skills.',
+    });
+    return;
+  }
+
+  bodyEl.createDiv({
+    cls: 'claudian-opencode-overview-summary',
+    text: `${commandCount} command${commandCount === 1 ? '' : 's'} • ${skillCount} skill${skillCount === 1 ? '' : 's'}`,
+  });
+
+  const listEl = bodyEl.createDiv({ cls: 'claudian-opencode-overview-list' });
+  const sortedEntries = [...entries].sort((left, right) => {
+    if (left.kind !== right.kind) {
+      return left.kind === 'skill' ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
+
+  for (const entry of sortedEntries) {
+    renderOpencodeCommandOverviewEntry(listEl, entry);
+  }
+}
+
+async function renderOpencodeMcpOverview(
+  summaryEl: HTMLElement,
+  bodyEl: HTMLElement,
+  settings: Record<string, unknown>,
+  vaultPath: string | null,
+): Promise<void> {
+  bodyEl.empty();
+
+  const overview = await readConfiguredOpencodeMcpOverview(settings, vaultPath);
+  summaryEl.setText(
+    overview.servers.length > 0
+      ? `Detected config servers (${overview.servers.length})`
+      : 'Detected config servers',
+  );
+
+  if (overview.servers.length === 0) {
+    bodyEl.createDiv({
+      cls: 'claudian-opencode-overview-empty',
+      text: overview.loadedPaths.length > 0
+        ? 'Detected OpenCode config files, but none of them currently declare MCP servers.'
+        : 'No OpenCode MCP servers detected in project or home config files.',
+    });
+
+    if (overview.searchedPaths.length > 0) {
+      bodyEl.createDiv({
+        cls: 'claudian-opencode-overview-meta',
+        text: `Checked: ${overview.searchedPaths.map(shortenDisplayPath).join(' • ')}`,
+      });
+    }
+    return;
+  }
+
+  bodyEl.createDiv({
+    cls: 'claudian-opencode-overview-summary',
+    text: `Loaded from ${overview.loadedPaths.length} config file${overview.loadedPaths.length === 1 ? '' : 's'}. OpenCode continues to manage MCP behavior through those files.`,
+  });
+
+  const listEl = bodyEl.createDiv({ cls: 'claudian-opencode-overview-list' });
+  for (const server of overview.servers) {
+    renderOpencodeMcpOverviewEntry(listEl, server);
+  }
+}
+
+function renderOpencodeCommandOverviewEntry(
+  listEl: HTMLElement,
+  entry: ProviderCommandEntry,
+): void {
+  const itemEl = listEl.createDiv({ cls: 'claudian-sp-item' });
+  const infoEl = itemEl.createDiv({ cls: 'claudian-sp-info' });
+  const headerEl = infoEl.createDiv({ cls: 'claudian-sp-item-header' });
+  headerEl.createEl('span', {
+    cls: 'claudian-sp-item-name',
+    text: `${entry.displayPrefix}${entry.name}`,
+  });
+  headerEl.createEl('span', {
+    cls: 'claudian-opencode-overview-badge',
+    text: entry.kind === 'skill' ? 'Skill' : 'Command',
+  });
+
+  if (entry.description) {
+    infoEl.createDiv({
+      cls: 'claudian-sp-item-desc',
+      text: entry.description,
+    });
+  }
+
+  infoEl.createDiv({
+    cls: 'claudian-opencode-overview-meta',
+    text: `Runtime • ${entry.source}`,
+  });
+}
+
+function renderOpencodeMcpOverviewEntry(
+  listEl: HTMLElement,
+  server: ConfiguredOpencodeMcpServer,
+): void {
+  const itemEl = listEl.createDiv({ cls: 'claudian-sp-item' });
+  const infoEl = itemEl.createDiv({ cls: 'claudian-sp-info' });
+  const headerEl = infoEl.createDiv({ cls: 'claudian-sp-item-header' });
+  headerEl.createEl('span', {
+    cls: 'claudian-sp-item-name',
+    text: server.name,
+  });
+  headerEl.createEl('span', {
+    cls: 'claudian-opencode-overview-badge',
+    text: getMcpServerType(server.config).toUpperCase(),
+  });
+
+  infoEl.createDiv({
+    cls: 'claudian-sp-item-desc',
+    text: describeMcpServerTarget(server.config),
+  });
+  infoEl.createDiv({
+    cls: 'claudian-opencode-overview-meta',
+    text: shortenDisplayPath(server.sourcePath),
+  });
+}
+
+async function readConfiguredOpencodeMcpOverview(
+  settings: Record<string, unknown>,
+  vaultPath: string | null,
+): Promise<ConfiguredOpencodeMcpOverview> {
+  const env = resolveOpencodeOverviewEnv(settings);
+  const searchedPaths = resolveOpencodeConfigCandidates(env, vaultPath);
+  const loadedPaths: string[] = [];
+  const servers: ConfiguredOpencodeMcpServer[] = [];
+  const seenNames = new Set<string>();
+
+  for (const candidatePath of searchedPaths) {
+    if (!candidatePath || !fs.existsSync(candidatePath)) {
+      continue;
+    }
+
+    try {
+      const rawConfig = await fsp.readFile(candidatePath, 'utf8');
+      const parsedServers = extractConfiguredMcpServers(rawConfig, candidatePath);
+      if (parsedServers.length === 0) {
+        loadedPaths.push(candidatePath);
+        continue;
+      }
+
+      loadedPaths.push(candidatePath);
+      for (const server of parsedServers) {
+        const key = server.name.toLowerCase();
+        if (seenNames.has(key)) {
+          continue;
+        }
+
+        seenNames.add(key);
+        servers.push(server);
+      }
+    } catch {
+      // Ignore unreadable config files; the settings view is best-effort only.
+    }
+  }
+
+  servers.sort((left, right) => left.name.localeCompare(right.name));
+  return { loadedPaths, searchedPaths, servers };
+}
+
+function resolveOpencodeOverviewEnv(
+  settings: Record<string, unknown>,
+): NodeJS.ProcessEnv {
+  const env = buildOpencodeRuntimeEnv(settings, '');
+  const home = env.HOME?.trim() || os.homedir();
+  const xdgConfigHome = env.XDG_CONFIG_HOME?.trim() || path.join(home, '.config');
+  return {
+    ...env,
+    HOME: home,
+    OPENCODE_CONFIG_DIR: env.OPENCODE_CONFIG_DIR?.trim() || path.join(xdgConfigHome, 'opencode'),
+    XDG_CONFIG_HOME: xdgConfigHome,
+  };
+}
+
+function resolveOpencodeConfigCandidates(
+  env: NodeJS.ProcessEnv,
+  vaultPath: string | null,
+): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const home = env.HOME?.trim() || os.homedir();
+  const projectConfigDisabled = isTruthyEnvValue(env.OPENCODE_DISABLE_PROJECT_CONFIG);
+  const configuredConfig = env.OPENCODE_CONFIG?.trim();
+  const configDir = env.OPENCODE_CONFIG_DIR?.trim()
+    || path.join(env.XDG_CONFIG_HOME?.trim() || path.join(home, '.config'), 'opencode');
+
+  const pushCandidate = (candidate: string | null | undefined): void => {
+    const normalized = candidate?.trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
+
+  pushCandidate(resolveConfiguredConfigPath(configuredConfig, vaultPath));
+
+  if (!projectConfigDisabled && vaultPath) {
+    pushCandidate(path.join(vaultPath, '.opencode', 'opencode.json'));
+    pushCandidate(path.join(vaultPath, '.opencode', 'config.json'));
+  }
+
+  pushCandidate(path.join(configDir, 'opencode.json'));
+  pushCandidate(path.join(configDir, 'config.json'));
+
+  if (process.platform === 'darwin') {
+    const appSupportDir = path.join(home, 'Library', 'Application Support', 'opencode');
+    pushCandidate(path.join(appSupportDir, 'opencode.json'));
+    pushCandidate(path.join(appSupportDir, 'config.json'));
+  }
+
+  return candidates;
+}
+
+function resolveConfiguredConfigPath(
+  configuredPath: string | undefined,
+  vaultPath: string | null,
+): string | null {
+  const trimmed = configuredPath?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const expanded = expandHomePath(trimmed);
+  if (path.isAbsolute(expanded)) {
+    return expanded;
+  }
+
+  return vaultPath ? path.resolve(vaultPath, expanded) : path.resolve(expanded);
+}
+
+function extractConfiguredMcpServers(
+  rawConfig: string,
+  sourcePath: string,
+): ConfiguredOpencodeMcpServer[] {
+  const parsed = JSON.parse(rawConfig) as unknown;
+  if (!isPlainObject(parsed)) {
+    return [];
+  }
+
+  const serverMaps = [
+    extractNamedMcpServerConfigs(parsed.mcpServers),
+    extractNamedMcpServerConfigs(parsed.mcp),
+    extractNamedMcpServerConfigs(
+      isPlainObject(parsed.mcp) ? parsed.mcp.servers : undefined,
+    ),
+  ];
+
+  const servers = serverMaps.find((entries) => entries.length > 0) ?? [];
+  return servers.map(({ name, config }) => ({
+    config,
+    name,
+    sourcePath,
+  }));
+}
+
+function extractNamedMcpServerConfigs(
+  value: unknown,
+): Array<{ name: string; config: McpServerConfig }> {
+  if (!isPlainObject(value)) {
+    return [];
+  }
+
+  const servers: Array<{ name: string; config: McpServerConfig }> = [];
+  for (const [name, config] of Object.entries(value)) {
+    if (!name.trim() || !isValidMcpServerConfig(config)) {
+      continue;
+    }
+
+    servers.push({
+      name: name.trim(),
+      config,
+    });
+  }
+
+  return servers;
+}
+
+function describeMcpServerTarget(config: McpServerConfig): string {
+  if ('command' in config) {
+    const args = config.args?.join(' ') ?? '';
+    return args ? `${config.command} ${args}` : config.command;
+  }
+
+  return config.url;
+}
+
+function shortenDisplayPath(fullPath: string): string {
+  const home = os.homedir();
+  return fullPath.startsWith(home)
+    ? `~${fullPath.slice(home.length)}`
+    : fullPath;
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isTruthyEnvValue(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized !== '0' && normalized !== 'false' && normalized !== 'no';
 }

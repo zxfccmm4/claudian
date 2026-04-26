@@ -345,3 +345,47 @@
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
+
+.claudian-opencode-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.claudian-opencode-overview-summary {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.claudian-opencode-overview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.claudian-opencode-overview-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(var(--claudian-brand-rgb), 0.12);
+  color: var(--claudian-brand);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+}
+
+.claudian-opencode-overview-meta {
+  margin-top: 4px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
+.claudian-opencode-overview-empty {
+  padding: 12px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
