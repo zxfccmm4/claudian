@@ -161,6 +161,15 @@ src/
 - [x] Codex provider integration
 - [ ] More to come!
 
+## Maintainer workflow
+
+This fork also has an upstream sync workflow for long-term maintenance.
+
+See:
+
+- [docs/UPSTREAM_SYNC_WORKFLOW.md](docs/UPSTREAM_SYNC_WORKFLOW.md)
+- [scripts/sync-upstream.sh](scripts/sync-upstream.sh)
+
 ## License
 
 Licensed under the [MIT License](LICENSE).
