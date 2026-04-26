@@ -169,6 +169,7 @@ See:
 
 - [docs/UPSTREAM_SYNC_WORKFLOW.md](docs/UPSTREAM_SYNC_WORKFLOW.md)
 - [scripts/sync-upstream.sh](scripts/sync-upstream.sh)
+- [scripts/export-release.sh](scripts/export-release.sh)
 
 ## License
 

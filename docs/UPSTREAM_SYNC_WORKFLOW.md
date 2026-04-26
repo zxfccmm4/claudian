@@ -58,7 +58,13 @@ The public release repo is:
 
 - `https://github.com/zxfccmm4/Claudian-Studio`
 
-After rebuilding, copy the release artifacts (`manifest.json`, `main.js`, `styles.css`, and release docs) into the release repo, then publish a new GitHub release there.
+After rebuilding, export the release package with:
+
+```bash
+npm run export:release
+```
+
+This updates the local release repository contents and regenerates the release zip.
 
 ## Notes
 

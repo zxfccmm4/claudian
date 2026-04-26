@@ -1,0 +1,8 @@
+{
+  "id": "claudian-opencode",
+  "name": "Claudian-Studio",
+  "description": "Patched multi-provider AI workspace for Obsidian with improved Claude, Codex, and OpenCode integration. Modified from YishenTu/claudian.",
+  "author": "Steve Zhou",
+  "authorUrl": "https://github.com/zxfccmm4",
+  "versionSuffix": "-steve.1"
+}
